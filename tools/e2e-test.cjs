@@ -634,6 +634,58 @@ async function waitFor(page, fn, timeout = 15000) {
       exclusive.checked.filter(Boolean).length === 1 && exclusive.checked[1] === true,
       `checked=${exclusive.checked} 徽标=${exclusive.badges} 名称=${exclusive.names.join(' / ')}`
     );
+    // 候选模型必须跟着 API 地址走：选了 A 家不该冒出 B 家的模型（填了也是 404）
+    const modelOptions = await optionsPage.evaluate(async () => {
+      const li = document.querySelectorAll('.provider')[1];
+      const baseUrl = li.querySelector('.p-baseUrl');
+      const setUrl = (value) => {
+        baseUrl.value = value;
+        baseUrl.dispatchEvent(new Event('input', { bubbles: true }));
+      };
+      const listOf = (el) => Array.from(el.querySelectorAll('option')).map((o) => o.value);
+      const explainList = () => listOf(document.getElementById('explainModels'));
+      const rowList = () => listOf(li.querySelector('.p-models'));
+
+      const select = document.getElementById('explainProvider');
+      select.value = li.dataset.id;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+
+      setUrl('https://api.openai.com/v1');
+      const openai = { row: rowList(), explain: explainList() };
+      setUrl('https://api.deepseek.com');
+      const deepseek = { row: rowList(), explain: explainList() };
+      setUrl('https://dashscope.aliyuncs.com/compatible-mode/v1');
+      const dashscope = { row: rowList(), explain: explainList() };
+      setUrl('http://127.0.0.1:9'); // 认不出的自定义地址：不瞎猜，留空让用户自己填
+      const unknown = { row: rowList(), explain: explainList() };
+
+      select.value = '';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      return { openai, deepseek, dashscope, unknown };
+    });
+    check(
+      '翻译模型候选跟随该接口的 API 地址',
+      modelOptions.openai.row.includes('gpt-4o-mini') &&
+        !modelOptions.openai.row.includes('deepseek-chat') &&
+        modelOptions.deepseek.row.includes('deepseek-chat') &&
+        !modelOptions.deepseek.row.includes('gpt-4o-mini'),
+      `openai=${modelOptions.openai.row} deepseek=${modelOptions.deepseek.row}`
+    );
+    check(
+      '详解模型候选跟随所选接口，且不列翻译专用模型',
+      modelOptions.deepseek.explain.includes('deepseek-chat') &&
+        !modelOptions.deepseek.explain.includes('gpt-4o-mini') &&
+        modelOptions.dashscope.explain.includes('qwen-plus') &&
+        !modelOptions.dashscope.explain.includes('qwen-mt-turbo') &&
+        modelOptions.dashscope.row.includes('qwen-mt-turbo'), // 翻译那栏仍可选 MT
+      `deepseek=${modelOptions.deepseek.explain} dashscope=${modelOptions.dashscope.explain}`
+    );
+    check(
+      '地址认不出时不给候选模型',
+      modelOptions.unknown.row.length === 0 && modelOptions.unknown.explain.length === 0,
+      `row=${modelOptions.unknown.row} explain=${modelOptions.unknown.explain}`
+    );
+
     await optionsPage.screenshot({ path: path.join(SHOT_DIR, '11-options-providers.png'), fullPage: true });
 
     await optionsPage.click('#saveBtn');

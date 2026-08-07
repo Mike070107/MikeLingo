@@ -42,10 +42,6 @@
             <p class="help" id="providerCount"></p>
           </div>
 
-          <datalist id="modelList">
-            <option value="deepseek-chat">deepseek-chat（推荐，速度快）</option>
-            <option value="deepseek-reasoner">deepseek-reasoner（更强推理，较慢）</option>
-          </datalist>
         </section>
 
         <template id="providerTpl">
@@ -72,7 +68,9 @@
                 </div>
                 <div class="field">
                   <label class="p-model-label">模型（翻译用）</label>
-                  <input class="p-model" list="modelList" spellcheck="false" placeholder="deepseek-chat" />
+                  <!-- 候选模型按这一行填的 API 地址生成，list 属性在 renderProviders 里接上 -->
+                  <input class="p-model" spellcheck="false" placeholder="deepseek-chat" />
+                  <datalist class="p-models"></datalist>
                   <p class="help">
                     模型名以服务商文档为准；火山方舟等平台可能需要填「接入点 ID」（<code>ep-</code> 开头）。
                     词典详解可以用另一个模型，在下面「划词翻译」里单独设。
@@ -259,15 +257,9 @@
             </div>
             <div class="field">
               <label for="explainModel">详解使用的模型</label>
-              <input id="explainModel" type="text" list="generalModels" placeholder="留空 = 跟随该接口的模型" />
-              <datalist id="generalModels">
-                <option value="qwen-plus"></option>
-                <option value="qwen-turbo"></option>
-                <option value="deepseek-chat"></option>
-                <option value="glm-4-flash"></option>
-                <option value="moonshot-v1-8k"></option>
-                <option value="gpt-4o-mini"></option>
-              </datalist>
+              <input id="explainModel" type="text" list="explainModels" placeholder="留空 = 跟随该接口的模型" />
+              <!-- 候选只列左边所选接口支持的通用模型，翻译专用模型不在其中：详解用不了 -->
+              <datalist id="explainModels"></datalist>
               <p class="help" id="explainModelHint"></p>
             </div>
           </div>

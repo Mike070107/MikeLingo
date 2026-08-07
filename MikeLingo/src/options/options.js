@@ -7,19 +7,147 @@ const $ = (id) => document.getElementById(id);
 const CLOSE_ICON =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
 
+/**
+ * 各服务商的常用模型。mt: true 表示翻译专用模型——能翻译，但做不了词典详解，
+ * 所以「详解使用的模型」的候选里会被滤掉。
+ * 通义两个预设共用一份：地址和密钥本来就是同一套，qwen-plus 和 qwen-mt-turbo 都能填。
+ */
+const DASHSCOPE_MODELS = [
+  { value: 'qwen-plus', note: '推荐，通用' },
+  { value: 'qwen-turbo', note: '更快更便宜' },
+  { value: 'qwen-max', note: '最强，较贵' },
+  { value: 'qwen-mt-turbo', note: '翻译专用，便宜', mt: true },
+  { value: 'qwen-mt-plus', note: '翻译专用，质量更好', mt: true }
+];
+
 /** 常见服务商预设：新增接口时直接填好地址和推荐模型，省得用户去翻文档 */
 const PRESETS = [
-  { key: 'deepseek', name: 'DeepSeek', baseUrl: 'https://api.deepseek.com', model: 'deepseek-chat' },
-  { key: 'siliconflow', name: '硅基流动', baseUrl: 'https://api.siliconflow.cn/v1', model: 'deepseek-ai/DeepSeek-V3' },
-  { key: 'zhipu', name: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash' },
-  { key: 'moonshot', name: '月之暗面 Kimi', baseUrl: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
-  { key: 'dashscope', name: '阿里通义千问', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus' },
-  { key: 'qwen-mt', name: '通义千问 MT（翻译专用）', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-mt-turbo' },
-  { key: 'doubao', name: '火山方舟 豆包', baseUrl: 'https://ark.cn-beijing.volces.com/api/v3', model: 'doubao-1-5-pro-32k' },
-  { key: 'gemini', name: 'Google Gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-2.5-flash' },
-  { key: 'openai', name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
-  { key: 'custom', name: '自定义（OpenAI 兼容）', baseUrl: 'https://', model: '' }
+  {
+    key: 'deepseek',
+    name: 'DeepSeek',
+    baseUrl: 'https://api.deepseek.com',
+    model: 'deepseek-chat',
+    models: [
+      { value: 'deepseek-chat', note: '推荐，速度快' },
+      { value: 'deepseek-reasoner', note: '更强推理，较慢' }
+    ]
+  },
+  {
+    key: 'siliconflow',
+    name: '硅基流动',
+    baseUrl: 'https://api.siliconflow.cn/v1',
+    model: 'deepseek-ai/DeepSeek-V3',
+    models: [
+      { value: 'deepseek-ai/DeepSeek-V3', note: '推荐' },
+      { value: 'deepseek-ai/DeepSeek-R1', note: '推理模型，较慢' },
+      { value: 'Qwen/Qwen2.5-7B-Instruct', note: '小模型，便宜' }
+    ]
+  },
+  {
+    key: 'zhipu',
+    name: '智谱 GLM',
+    baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+    model: 'glm-4-flash',
+    models: [
+      { value: 'glm-4-flash', note: '推荐，有免费额度' },
+      { value: 'glm-4-air', note: '质量更好' },
+      { value: 'glm-4-plus', note: '最强，较贵' }
+    ]
+  },
+  {
+    key: 'moonshot',
+    name: '月之暗面 Kimi',
+    baseUrl: 'https://api.moonshot.cn/v1',
+    model: 'moonshot-v1-8k',
+    models: [
+      { value: 'moonshot-v1-8k', note: '推荐，短文本够用' },
+      { value: 'moonshot-v1-32k' },
+      { value: 'moonshot-v1-128k', note: '长上下文，较贵' }
+    ]
+  },
+  {
+    key: 'dashscope',
+    name: '阿里通义千问',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: 'qwen-plus',
+    models: DASHSCOPE_MODELS
+  },
+  {
+    key: 'qwen-mt',
+    name: '通义千问 MT（翻译专用）',
+    baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+    model: 'qwen-mt-turbo',
+    models: DASHSCOPE_MODELS
+  },
+  {
+    key: 'doubao',
+    name: '火山方舟 豆包',
+    baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+    model: 'doubao-1-5-pro-32k',
+    models: [
+      { value: 'doubao-1-5-pro-32k', note: '推荐' },
+      { value: 'doubao-1-5-lite-32k', note: '更便宜' }
+    ]
+  },
+  {
+    key: 'gemini',
+    name: 'Google Gemini',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    model: 'gemini-2.5-flash',
+    models: [
+      { value: 'gemini-2.5-flash', note: '推荐' },
+      { value: 'gemini-2.5-pro', note: '最强，较贵' },
+      { value: 'gemini-2.0-flash', note: '更便宜' }
+    ]
+  },
+  {
+    key: 'openai',
+    name: 'OpenAI',
+    baseUrl: 'https://api.openai.com/v1',
+    model: 'gpt-4o-mini',
+    models: [
+      { value: 'gpt-4o-mini', note: '推荐，便宜' },
+      { value: 'gpt-4o' },
+      { value: 'gpt-4.1-mini' }
+    ]
+  },
+  { key: 'custom', name: '自定义（OpenAI 兼容）', baseUrl: 'https://', model: '', models: [] }
 ];
+
+/** 按 API 地址的域名找服务商，而不是按接口 id/名称——用户改了名或复制了一个接口也认得出 */
+function presetForBaseUrl(baseUrl) {
+  let host = '';
+  try {
+    host = new URL(String(baseUrl || '')).host.toLowerCase();
+  } catch {
+    return null;
+  }
+  if (!host) return null;
+  return PRESETS.find((preset) => {
+    try {
+      return new URL(preset.baseUrl).host.toLowerCase() === host;
+    } catch {
+      return false;
+    }
+  }) || null;
+}
+
+/**
+ * 把候选模型填进某个 datalist。选中的是 A 服务商就不该冒出 B 服务商的模型，
+ * 否则填了也是 404。地址认不出来（自定义接口）就留空，让用户自己填。
+ */
+function fillModelOptions(datalist, baseUrl, { excludeMt = false } = {}) {
+  if (!datalist) return;
+  const preset = presetForBaseUrl(baseUrl);
+  const models = (preset?.models || []).filter((m) => !(excludeMt && m.mt));
+  datalist.innerHTML = '';
+  for (const model of models) {
+    const option = document.createElement('option');
+    option.value = model.value;
+    if (model.note) option.textContent = `${model.value}（${model.note}）`;
+    datalist.appendChild(option);
+  }
+}
 
 let settings = null;
 let providers = [];
@@ -126,8 +254,17 @@ function renderProviders() {
 
     bindField(li, provider, 'name');
     const modelInput = bindField(li, provider, 'model');
-    bindField(li, provider, 'baseUrl');
+    const baseUrlInput = bindField(li, provider, 'baseUrl');
     bindField(li, provider, 'temperature');
+
+    // 候选模型跟着这一行的 API 地址走：模板里的 datalist 没有 id，这里补上再接到输入框
+    const modelOptions = li.querySelector('.p-models');
+    modelOptions.id = `models-${provider.id}`;
+    modelInput.setAttribute('list', modelOptions.id);
+    const syncModelOptions = () => fillModelOptions(modelOptions, baseUrlInput.value);
+    baseUrlInput.addEventListener('input', syncModelOptions);
+    baseUrlInput.addEventListener('input', syncExplainProviderWarn); // 详解那边的候选也跟着换
+    syncModelOptions();
     bindField(li, provider, 'timeout', {
       toInput: (ms) => Math.round(ms / 1000),
       fromInput: (v) => Math.round(Number(v) * 1000)
@@ -286,6 +423,9 @@ function syncExplainProviderWarn() {
   const hint = $('explainModelHint');
   if (!warn) return;
   const { provider, model, overridden } = resolveExplainTarget();
+
+  // 候选只给这个接口自家的通用模型：选了 DeepSeek 就不该看到 gpt-4o-mini
+  fillModelOptions($('explainModels'), provider?.baseUrl, { excludeMt: true });
 
   if (hint) {
     hint.textContent = provider

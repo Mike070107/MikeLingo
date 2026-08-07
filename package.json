@@ -1,6 +1,6 @@
 {
   "name": "mikelingo",
-  "version": "1.10.0",
+  "version": "1.10.1",
   "description": "MikeLingo —— Chrome 网页对照翻译扩展（开发与测试用的 Node 依赖，不参与打包）",
   "private": true,
   "scripts": {
