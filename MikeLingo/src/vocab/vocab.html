@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MikeLingo · 生词本</title>
+    <link rel="stylesheet" href="vocab.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="page-head">
+        <span class="logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2.6 12 6.7 3.1 10.8 12" /><path d="M4.2 9.1h5.1" />
+            <path d="m16.7 11.8-1 1.4" /><path d="M13.5 14.2h7" />
+            <path d="M19.2 15.5 13.9 20.4" /><path d="m15 15.5 5.3 4.9" />
+          </svg>
+        </span>
+        <div>
+          <h1>生词本</h1>
+          <p class="sub">划词卡片和快速翻译里点「加入生词本」就会存到这里，按记忆曲线安排复习。</p>
+        </div>
+        <button type="button" class="ghost head-action" id="openOptions">翻译设置</button>
+      </header>
+
+      <section class="stats" aria-label="生词本概况">
+        <div class="stat">
+          <span class="stat-num" id="statTotal">—</span>
+          <span class="stat-label">总词条</span>
+        </div>
+        <div class="stat stat-due">
+          <span class="stat-num" id="statDue">—</span>
+          <span class="stat-label">待复习</span>
+        </div>
+        <div class="stat">
+          <span class="stat-num" id="statNew">—</span>
+          <span class="stat-label">新词</span>
+        </div>
+        <div class="stat">
+          <span class="stat-num" id="statLearning">—</span>
+          <span class="stat-label">学习中</span>
+        </div>
+        <div class="stat stat-mastered">
+          <span class="stat-num" id="statMastered">—</span>
+          <span class="stat-label">已掌握</span>
+        </div>
+      </section>
+
+      <div class="tabs" role="tablist" aria-label="生词本视图">
+        <button type="button" role="tab" id="tabList" aria-selected="true" aria-controls="viewList">词表</button>
+        <button type="button" role="tab" id="tabReview" aria-selected="false" aria-controls="viewReview">
+          复习<span class="tab-badge" id="tabReviewBadge" hidden></span>
+        </button>
+      </div>
+
+      <!-- ------------------------------- 词表 ------------------------------- -->
+      <main id="viewList" role="tabpanel" aria-labelledby="tabList">
+        <section class="card toolbar">
+          <div class="field grow">
+            <label for="searchInput">搜索</label>
+            <input id="searchInput" type="search" placeholder="按单词、译文或笔记搜索" autocomplete="off" spellcheck="false" />
+          </div>
+          <div class="field">
+            <label for="filterSelect">筛选</label>
+            <select id="filterSelect">
+              <option value="all">全部</option>
+              <option value="due">待复习</option>
+              <option value="new">新词</option>
+              <option value="learning">学习中</option>
+              <option value="mastered">已掌握</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="sortSelect">排序</label>
+            <select id="sortSelect">
+              <option value="added">最近添加</option>
+              <option value="due">复习时间</option>
+              <option value="alpha">字母顺序</option>
+            </select>
+          </div>
+        </section>
+
+        <p class="list-meta" id="listMeta" aria-live="polite">加载中…</p>
+
+        <ul class="word-list" id="wordList"></ul>
+
+        <p class="empty" id="listEmpty" hidden>
+          还没有生词。在网页上选中单词，卡片里点「加入生词本」就会出现在这里。
+        </p>
+
+        <section class="card danger-zone">
+          <h2>数据管理</h2>
+          <p class="card-desc">生词本存在本机浏览器里，不会上传。换电脑或重装扩展前记得先导出。</p>
+          <div class="actions-row">
+            <button type="button" class="secondary" id="exportJson">导出 JSON</button>
+            <button type="button" class="secondary" id="exportCsv">导出 CSV</button>
+            <button type="button" class="secondary" id="importBtn">导入 JSON</button>
+            <input type="file" id="importFile" accept="application/json,.json" hidden />
+            <button type="button" class="ghost danger" id="clearBtn">清空生词本</button>
+          </div>
+          <p class="io-result" id="ioResult" role="status" hidden></p>
+        </section>
+      </main>
+
+      <!-- ------------------------------- 复习 ------------------------------- -->
+      <main id="viewReview" role="tabpanel" aria-labelledby="tabReview" hidden>
+        <section class="card review" id="reviewCard" hidden>
+          <div class="review-head">
+            <span class="review-progress" id="reviewProgress">0 / 0</span>
+            <span class="review-status" id="reviewStatus"></span>
+          </div>
+
+          <div class="review-word">
+            <span id="reviewWord">—</span>
+            <button type="button" class="speak-btn" id="reviewSpeak" title="朗读单词" aria-label="朗读单词">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M11 5 6 9H2v6h4l5 4V5Z" /><path d="M15.5 8.5a5 5 0 0 1 0 7" /><path d="M18.5 5.5a9 9 0 0 1 0 13" />
+              </svg>
+              <span>朗读</span>
+            </button>
+          </div>
+          <p class="review-phonetic" id="reviewPhonetic"></p>
+          <p class="review-hint" id="speakHint" role="status"></p>
+
+          <button type="button" class="primary reveal" id="revealBtn">显示答案<kbd>空格</kbd></button>
+
+          <div class="review-answer" id="reviewAnswer" hidden>
+            <p class="review-translation" id="reviewTranslation"></p>
+            <div class="review-explain" id="reviewExplain" hidden></div>
+            <p class="review-context" id="reviewContext" hidden></p>
+            <p class="review-source" id="reviewSource" hidden></p>
+
+            <div class="grade-row" role="group" aria-label="记忆程度">
+              <button type="button" class="grade grade-again" data-grade="again">
+                忘记<em id="gradeAgainHint"></em><kbd>1</kbd>
+              </button>
+              <button type="button" class="grade grade-hard" data-grade="hard">
+                模糊<em id="gradeHardHint"></em><kbd>2</kbd>
+              </button>
+              <button type="button" class="grade grade-good" data-grade="good">
+                记得<em id="gradeGoodHint"></em><kbd>3</kbd>
+              </button>
+              <button type="button" class="grade grade-easy" data-grade="easy">
+                简单<em id="gradeEasyHint"></em><kbd>4</kbd>
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <section class="card review-done" id="reviewDone" hidden>
+          <h2 id="reviewDoneTitle">今天没有要复习的词</h2>
+          <p class="card-desc" id="reviewDoneDesc">继续在网页上划词收集生词，到期后会出现在这里。</p>
+          <div class="actions-row">
+            <button type="button" class="secondary" id="reviewRestart">重新检查</button>
+            <button type="button" class="ghost" id="backToList">回到词表</button>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <template id="wordTpl">
+      <li class="word">
+        <div class="word-main">
+          <div class="word-head">
+            <span class="w-text"></span>
+            <span class="w-phonetic"></span>
+            <button type="button" class="speak-btn w-speak" title="朗读" aria-label="朗读单词">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M11 5 6 9H2v6h4l5 4V5Z" /><path d="M15.5 8.5a5 5 0 0 1 0 7" /><path d="M18.5 5.5a9 9 0 0 1 0 13" />
+              </svg>
+            </button>
+            <span class="badge w-status"></span>
+          </div>
+          <p class="w-translation"></p>
+          <details class="w-explain" hidden>
+            <summary>详细解释</summary>
+            <div class="w-explain-body"></div>
+          </details>
+          <p class="w-context"></p>
+          <p class="w-meta">
+            <span class="w-due"></span>
+            <a class="w-source" target="_blank" rel="noreferrer noopener" hidden></a>
+          </p>
+        </div>
+        <button type="button" class="ghost danger w-remove">删除</button>
+      </li>
+    </template>
+
+    <script type="module" src="vocab.js"></script>
+  </body>
+</html>

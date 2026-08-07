@@ -1,0 +1,53 @@
+{
+  "manifest_version": 3,
+  "name": "MikeLingo",
+  "version": "1.10.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvcqn36UMTBTG0pwsDIJIE/DCe8lCR4OJq/5RTADq0nOGsXuBq2JBs2HoMN/F/e1EHCgDAz+S9LRS0bE+LfoRXifcCS/gzwik68YyViIdJOlUsZGUjaKLk+fjFtMwwBpphpiBgYboVDUaCWAM6RXUXgplmPAPPOLEMCNw3eoX1RMPiILrgthN37XTgatgQKsTlqqDPlv8PA5A24FXRYu8ZEMDCBSiCZXy7inNoOlgPibw3CY3B/CxBbGWxVtr3upr69NtH9KkrdI7W4cu8PQvMwi4QyS02y8hGeI+mDuG7PVkixt2ZpGmVdMjFRAjP3mtC93kceTolPkCddfDz685MQIDAQAB",
+  "description": "多接口 AI 网页对照翻译与划词翻译，兼容 DeepSeek / 通义 / 智谱 / Gemini 等 OpenAI 协议服务，地址、模型与样式均可自定义。",
+  "minimum_chrome_version": "114",
+  "permissions": ["storage", "contextMenus", "activeTab", "scripting", "tts", "offscreen"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "src/background/service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/common/shared.js", "src/content/content.js"],
+      "css": ["src/content/content.css"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ],
+  "action": {
+    "default_title": "MikeLingo",
+    "default_popup": "src/popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "options_ui": {
+    "page": "src/options/options.html",
+    "open_in_tab": true
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "commands": {
+    "toggle-translate": {
+      "suggested_key": { "default": "Alt+T" },
+      "description": "翻译 / 还原当前页面"
+    },
+    "open-vocab": {
+      "suggested_key": { "default": "Alt+Shift+V" },
+      "description": "打开生词本"
+    }
+  }
+}

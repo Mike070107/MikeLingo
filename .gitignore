@@ -1,0 +1,17 @@
+# 依赖
+node_modules/
+
+# 固定扩展 ID 的私钥：绝不能进公开仓库（说明文档本身没有秘密，留着便于查阅）
+keys/*
+!keys/README.md
+
+# 发布产物：zip 作为 GitHub Release 的附件分发，解压态副本由 tag 还原，不进版本库
+Release/
+
+# 测试截图（每次跑 e2e 都会重生成）
+tools/screenshots/
+
+# 杂项
+*.log
+.DS_Store
+Thumbs.db

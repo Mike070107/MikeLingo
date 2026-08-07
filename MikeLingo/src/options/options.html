@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MikeLingo · 设置</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="page-head">
+        <span class="logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2.6 12 6.7 3.1 10.8 12" /><path d="M4.2 9.1h5.1" />
+            <path d="m16.7 11.8-1 1.4" /><path d="M13.5 14.2h7" />
+            <path d="M19.2 15.5 13.9 20.4" /><path d="m15 15.5 5.3 4.9" />
+          </svg>
+        </span>
+        <div>
+          <h1>MikeLingo</h1>
+          <p class="sub">配置 API 与翻译显示方式，所有设置立即生效，无需重装扩展。</p>
+        </div>
+      </header>
+
+      <main>
+        <section class="card">
+          <h2>翻译接口</h2>
+          <p class="card-desc">
+            可以配置多个接口，<strong>勾选哪一个就用哪一个</strong>——同一时刻只有一个生效，切换后立即生效。
+            兼容 OpenAI 协议的服务均可（路径自动拼接 <code>/chat/completions</code>）。
+            密钥仅保存在本机浏览器（chrome.storage.local），不会同步到云端，也不会出现在页面或日志中。
+            可前往 <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noreferrer noopener">DeepSeek 开放平台</a> 创建密钥。
+          </p>
+
+          <ul class="provider-list" id="providerList"></ul>
+          <p class="error" id="providersError" hidden></p>
+
+          <div class="actions-row">
+            <label class="inline-label" for="presetSelect">按服务商添加</label>
+            <select id="presetSelect"></select>
+            <button type="button" class="secondary" id="addProvider">添加接口</button>
+            <p class="help" id="providerCount"></p>
+          </div>
+
+          <datalist id="modelList">
+            <option value="deepseek-chat">deepseek-chat（推荐，速度快）</option>
+            <option value="deepseek-reasoner">deepseek-reasoner（更强推理，较慢）</option>
+          </datalist>
+        </section>
+
+        <template id="providerTpl">
+          <li class="provider">
+            <div class="provider-head">
+              <label class="provider-pick">
+                <input type="radio" name="activeProvider" class="p-active" />
+                <span class="provider-title">
+                  <span class="p-name-text"></span>
+                  <em class="p-meta"></em>
+                </span>
+              </label>
+              <span class="badge p-badge">使用中</span>
+              <span class="keystate p-keystate"></span>
+              <button type="button" class="ghost p-toggle" aria-expanded="false">编辑</button>
+              <button type="button" class="ghost danger p-remove">删除</button>
+            </div>
+
+            <div class="provider-body" hidden>
+              <div class="grid-2">
+                <div class="field">
+                  <label class="p-name-label">名称</label>
+                  <input class="p-name" type="text" spellcheck="false" maxlength="40" placeholder="例如：DeepSeek 官方" />
+                </div>
+                <div class="field">
+                  <label class="p-model-label">模型（翻译用）</label>
+                  <input class="p-model" list="modelList" spellcheck="false" placeholder="deepseek-chat" />
+                  <p class="help">
+                    模型名以服务商文档为准；火山方舟等平台可能需要填「接入点 ID」（<code>ep-</code> 开头）。
+                    词典详解可以用另一个模型，在下面「划词翻译」里单独设。
+                  </p>
+                  <p class="help mt-note p-mtnote" hidden>
+                    翻译专用模型：会忽略自定义提示词，只按目标语言直译；扩展已自动改为逐条发送并传 <code>translation_options</code>。
+                  </p>
+                  <p class="error p-model-error" hidden></p>
+                </div>
+              </div>
+
+              <div class="field">
+                <label class="p-baseUrl-label">API 地址</label>
+                <input class="p-baseUrl" type="url" spellcheck="false" placeholder="https://api.deepseek.com" />
+                <p class="error p-baseUrl-error" hidden></p>
+              </div>
+
+              <div class="field">
+                <label class="p-key-label">API Key</label>
+                <div class="input-row">
+                  <input class="p-key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-..." />
+                  <button type="button" class="ghost p-showkey" aria-pressed="false">显示</button>
+                  <button type="button" class="ghost danger p-clearkey">清除</button>
+                </div>
+                <p class="help p-keyhelp"></p>
+                <p class="error p-key-error" hidden></p>
+              </div>
+
+              <div class="grid-2">
+                <div class="field">
+                  <label class="p-temperature-label">温度（temperature）</label>
+                  <input class="p-temperature" type="number" min="0" max="2" step="0.1" />
+                  <p class="help">DeepSeek 官方建议翻译场景使用 1.3</p>
+                </div>
+                <div class="field">
+                  <label class="p-timeout-label">单次请求超时（秒）</label>
+                  <input class="p-timeout" type="number" min="5" max="300" step="5" />
+                  <p class="help">长段落或推理模型建议设置更长</p>
+                </div>
+              </div>
+
+              <div class="actions-row">
+                <button type="button" class="secondary p-test">发送测试请求</button>
+                <p class="test-result p-testresult"></p>
+              </div>
+            </div>
+          </li>
+        </template>
+
+        <section class="card">
+          <h2>翻译行为</h2>
+          <div class="grid-2">
+            <div class="field">
+              <label for="targetLang">目标语言</label>
+              <input id="targetLang" list="langList" spellcheck="false" />
+              <datalist id="langList">
+                <option value="简体中文"></option>
+                <option value="繁體中文"></option>
+                <option value="English"></option>
+                <option value="日本語"></option>
+                <option value="한국어"></option>
+              </datalist>
+            </div>
+            <div class="field">
+              <label for="concurrency">并发请求数</label>
+              <input id="concurrency" type="number" min="1" max="10" step="1" />
+              <p class="help">过高易触发限流，建议 2–4</p>
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <div class="field">
+              <label for="batchSize">每批段落数</label>
+              <input id="batchSize" type="number" min="1" max="40" step="1" />
+            </div>
+            <div class="field">
+              <label for="batchChars">每批最大字符数</label>
+              <input id="batchChars" type="number" min="200" max="6000" step="100" />
+            </div>
+          </div>
+
+          <label class="check">
+            <input type="checkbox" id="onlyTranslateForeign" />
+            <span>跳过已是中文的段落（推荐，可节省额度）</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" id="cacheEnabled" />
+            <span>启用本地翻译缓存（相同内容不重复计费）</span>
+          </label>
+
+          <div class="field">
+            <label for="customPrompt">自定义提示词（可选）</label>
+            <textarea id="customPrompt" rows="3" placeholder="例如：术语 prompt 统一译为「提示词」；保持技术文档风格。"></textarea>
+            <p class="help">会追加到系统提示词末尾，优先级最高</p>
+          </div>
+
+          <div class="actions-row">
+            <button type="button" class="secondary" id="clearCacheBtn">清除翻译缓存</button>
+            <p class="help" id="cacheInfo">缓存条目：—</p>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>显示方式</h2>
+          <div class="grid-2">
+            <div class="field">
+              <label for="displayMode">对照模式</label>
+              <select id="displayMode">
+                <option value="inline">段落对照（译文显示在原文下方）</option>
+                <option value="columns">左右并列（原文左、译文右）</option>
+                <option value="replace">仅显示译文（替换原文）</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="styleVariant">译文样式</label>
+              <select id="styleVariant">
+                <option value="dashed">虚线下划线</option>
+                <option value="solid">实线下划线</option>
+                <option value="quote">左侧竖线</option>
+                <option value="highlight">浅色背景</option>
+                <option value="none">无标记</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="grid-2">
+            <div class="field">
+              <label for="translationFont">译文字体</label>
+              <select id="translationFont">
+                <option value="cjk">系统中文字体（推荐）</option>
+                <option value="inherit">跟随原网页字体</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="fontScale">译文字号（相对原文 %）</label>
+              <input id="fontScale" type="number" min="70" max="150" step="5" />
+            </div>
+          </div>
+
+          <div class="preview" id="preview">
+            <span class="preview-label">效果预览</span>
+            <div class="preview-body" id="previewBody">
+              <div class="preview-pair">
+                <p class="preview-origin">Large language models are changing how people read the web.</p>
+                <p class="preview-trans" id="previewTrans">大语言模型正在改变人们浏览网页的方式。</p>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>划词翻译</h2>
+          <label class="check">
+            <input type="checkbox" id="selectionEnabled" />
+            <span>启用划词翻译</span>
+          </label>
+          <div class="field">
+            <label for="selectionTrigger">触发方式</label>
+            <select id="selectionTrigger">
+              <option value="button">选中后显示按钮，点击翻译</option>
+              <option value="instant">选中后立即翻译</option>
+              <option value="alt">按住 Alt 选中时翻译</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="explainMode">词典详解</label>
+            <select id="explainMode">
+              <option value="auto">自动：词和短语给出释义、例句、用法</option>
+              <option value="manual">手动：点「详细解释」才查</option>
+              <option value="off">关闭：只给译文</option>
+            </select>
+            <p class="help">
+              详解会<strong>另外发一次请求</strong>（约多花一条翻译的额度），给出分词性的释义、双语例句、
+              用法辨析和相关词，专有名词会说明是什么、在哪、为什么有名。
+              自动模式只对 5 个英文单词 / 12 个汉字以内的短内容发起，长句子仍需手动点「详细解释」。
+              同一个词的详解会缓存在本机，再划一次不重复计费。
+            </p>
+          </div>
+          <div class="grid-2" id="explainProviderField">
+            <div class="field">
+              <label for="explainProvider">详解使用的接口</label>
+              <select id="explainProvider"></select>
+              <p class="help">决定用哪个 API 地址和密钥。同一家服务商的话选「跟随翻译接口」即可</p>
+            </div>
+            <div class="field">
+              <label for="explainModel">详解使用的模型</label>
+              <input id="explainModel" type="text" list="generalModels" placeholder="留空 = 跟随该接口的模型" />
+              <datalist id="generalModels">
+                <option value="qwen-plus"></option>
+                <option value="qwen-turbo"></option>
+                <option value="deepseek-chat"></option>
+                <option value="glm-4-flash"></option>
+                <option value="moonshot-v1-8k"></option>
+                <option value="gpt-4o-mini"></option>
+              </datalist>
+              <p class="help" id="explainModelHint"></p>
+            </div>
+          </div>
+          <p class="help">
+            <strong>翻译和详解可以用两个不同的模型。</strong>最常见的搭配：翻译用
+            <code>qwen-mt-turbo</code> 这类<strong>翻译专用模型</strong>（便宜、专精），
+            详解用通用对话模型（<code>qwen-plus</code>、<code>deepseek-chat</code> 等）。
+            两者服务商相同时，接口选「跟随翻译接口」、这里只填模型名就行，地址和密钥都不用再配一遍；
+            不同服务商才需要在上面「翻译接口」里另加一个接口，再到左边选它。
+            <strong>翻译专用模型做不了详解</strong>——它们不看提示词，只会把原文再翻一遍。
+          </p>
+          <p class="field-error" id="explainProviderWarn" hidden></p>
+        </section>
+
+        <section class="card">
+          <h2>音标、发音与生词本</h2>
+          <p class="card-desc">
+            划词卡片和快速翻译里，选中<strong>单个英文单词</strong>时会显示音标和真人发音；
+            短语和句子没有音标，朗读会用系统语音合成。音标来自免费的
+            <a href="https://dictionaryapi.dev" target="_blank" rel="noreferrer noopener">dictionaryapi.dev</a>，
+            不需要密钥，查询结果缓存在本机，查不到不影响翻译。
+          </p>
+
+          <label class="check">
+            <input type="checkbox" id="dictEnabled" />
+            <span>查询单词音标与真人发音</span>
+          </label>
+          <label class="check">
+            <input type="checkbox" id="vocabSaveContext" />
+            <span>加入生词本时保存原句和来源网址（复习时能看到上下文）</span>
+          </label>
+
+          <div class="grid-2">
+            <div class="field">
+              <label for="speechAccent">发音口音</label>
+              <select id="speechAccent">
+                <option value="us">美式（en-US）</option>
+                <option value="uk">英式（en-GB）</option>
+              </select>
+              <p class="help">同时决定挑哪条真人音频、以及语音合成用哪种嗓音</p>
+            </div>
+            <div class="field">
+              <label for="speechRate">语速（0.5–2）</label>
+              <input id="speechRate" type="number" min="0.5" max="2" step="0.1" />
+              <p class="help">1 为正常语速，听不清可以调到 0.8</p>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="audioSource">发音音源</label>
+            <select id="audioSource">
+              <option value="auto">自动：单词用有道真人发音，整句用百度语音（推荐）</option>
+              <option value="youdao">只用有道词典（单词真人录音，读不了整句）</option>
+              <option value="baidu">只用百度语音（整句、中日韩都能读）</option>
+              <option value="dict">只用 dictionaryapi.dev（国际，音频服务常不稳定）</option>
+              <option value="none">不联网，只用系统语音合成</option>
+            </select>
+            <p class="help">
+              朗读需要联网：<code>dict.youdao.com</code> 是词典录音，只认单词和短词组，句子会失败；
+              <code>fanyi.baidu.com</code> 是语音合成，整句、中文、日文都能读，1000 字以内。
+              两者国内外都能直连，dictionaryapi.dev 的音频节点则经常返回 502。
+              全都拿不到时改用系统语音合成——那条路不联网，但要求电脑装了对应语言的语音包。
+              <strong>朗读的内容会发给对应服务商</strong>；介意就选「不联网」。
+            </p>
+          </div>
+
+          <div class="voice-state" id="voiceState">
+            <span class="voice-title">系统语音包</span>
+            <p class="voice-detail" id="voiceDetail">检测中…</p>
+          </div>
+
+          <div class="actions-row">
+            <button type="button" class="secondary" id="testSpeak">试听发音</button>
+            <button type="button" class="secondary" id="openVocab">打开生词本</button>
+            <p class="test-result" id="speakResult"></p>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>自动翻译网站</h2>
+          <p class="card-desc">打开列表中的网站时自动开启对照翻译。支持 <code>example.com</code> 与 <code>*.example.com</code>。</p>
+          <div class="field">
+            <label for="siteInput">添加网站</label>
+            <div class="input-row">
+              <input id="siteInput" type="text" spellcheck="false" placeholder="例如：news.ycombinator.com" />
+              <button type="button" class="secondary" id="addSite">添加</button>
+            </div>
+            <p class="error" id="siteError" hidden></p>
+          </div>
+          <ul class="chips" id="siteList"></ul>
+          <p class="help" id="siteEmpty">暂无自动翻译网站，可在插件弹窗里一键添加当前站点。</p>
+        </section>
+
+        <section class="card">
+          <h2>版本与更新</h2>
+          <p class="card-desc">
+            从 GitHub Releases 检查新版本，可以<strong>直接下载并覆盖安装目录</strong>，装完自动重载，
+            不用再手动跑批处理、也不用去扩展页刷新。首次安装时浏览器会让你选一次安装目录并授权写入，
+            之后就记住了。
+          </p>
+
+          <div class="version-row">
+            <span class="version-label">当前版本</span>
+            <strong class="version-value" id="currentVersion">—</strong>
+            <span class="version-checked" id="updateCheckedAt"></span>
+          </div>
+
+          <div class="field">
+            <label for="updateRepo">更新源（GitHub 仓库）</label>
+            <input id="updateRepo" type="text" spellcheck="false" placeholder="用户名/仓库名" />
+            <p class="help">填 <code>用户名/仓库名</code>，直接粘仓库网址也认。留空则不检查更新。</p>
+          </div>
+
+          <div class="actions-row">
+            <button type="button" class="secondary" id="checkUpdate">检查更新</button>
+            <p class="test-result" id="updateResult"></p>
+          </div>
+
+          <div class="update-box" id="updateBox" hidden>
+            <div class="update-head">
+              <strong id="updateVersion"></strong>
+              <a id="updateLink" href="#" target="_blank" rel="noreferrer noopener" class="link">在 GitHub 查看</a>
+            </div>
+            <pre class="update-notes" id="updateNotes"></pre>
+            <div class="actions-row">
+              <button type="button" class="primary" id="installUpdate">下载并安装</button>
+              <button type="button" class="secondary" id="pickDir">重新选择安装目录</button>
+            </div>
+            <p class="help" id="updateProgress" role="status" aria-live="polite"></p>
+          </div>
+        </section>
+      </main>
+
+      <footer class="save-bar">
+        <div class="save-status" id="saveStatus" role="status" aria-live="polite"></div>
+        <button type="button" class="primary" id="saveBtn">保存设置</button>
+      </footer>
+    </div>
+
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

@@ -1,0 +1,75 @@
+/* 注入宿主页面的样式：只作用于插件自身的自定义元素，避免影响原页面 */
+
+dst-origin {
+  display: inline;
+}
+
+dst-origin.dst-origin-hidden {
+  display: none;
+}
+
+dst-trans.dst-translation {
+  display: block;
+  margin: 0.35em 0 0;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  font-style: normal;
+  line-height: 1.7;
+  text-align: inherit;
+  text-indent: 0;
+  letter-spacing: normal;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* 译文样式变体 */
+dst-trans.dst-style-dashed {
+  text-decoration: underline dashed rgba(37, 99, 235, 0.45);
+  text-underline-offset: 5px;
+  text-decoration-thickness: 1px;
+}
+
+dst-trans.dst-style-solid {
+  text-decoration: underline solid rgba(37, 99, 235, 0.4);
+  text-underline-offset: 5px;
+  text-decoration-thickness: 1px;
+}
+
+dst-trans.dst-style-quote {
+  border-left: 3px solid rgba(37, 99, 235, 0.5);
+  padding-left: 12px;
+}
+
+dst-trans.dst-style-highlight {
+  background: rgba(37, 99, 235, 0.08);
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+
+/* 左右并列模式：额外插入的行容器，不改动原元素自身的 display */
+dst-row.dst-row {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+dst-trans.dst-col,
+dst-origin.dst-col {
+  flex: 1 1 0;
+  min-width: 0;
+  display: block;
+  margin-top: 0;
+}
+
+@media (max-width: 720px) {
+  dst-row.dst-row {
+    display: block;
+  }
+
+  dst-trans.dst-col {
+    margin-top: 0.5em;
+  }
+}

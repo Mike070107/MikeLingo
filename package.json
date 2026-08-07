@@ -1,0 +1,17 @@
+{
+  "name": "mikelingo",
+  "version": "1.10.0",
+  "description": "MikeLingo —— Chrome 网页对照翻译扩展（开发与测试用的 Node 依赖，不参与打包）",
+  "private": true,
+  "scripts": {
+    "test": "node tools/e2e-test.cjs",
+    "test:real": "node tools/real-api-test.cjs",
+    "icons": "node tools/generate-icons.cjs",
+    "pack": "node tools/pack.cjs"
+  },
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "puppeteer": "^23.11.1"
+  }
+}

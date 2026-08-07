@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>MikeLingo</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="head">
+      <div class="brand">
+        <span class="logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M2.6 12 6.7 3.1 10.8 12" /><path d="M4.2 9.1h5.1" />
+            <path d="m16.7 11.8-1 1.4" /><path d="M13.5 14.2h7" />
+            <path d="M19.2 15.5 13.9 20.4" /><path d="m15 15.5 5.3 4.9" />
+          </svg>
+        </span>
+        <div>
+          <div class="brand-name">MikeLingo</div>
+          <div class="brand-sub" id="pageHost">—</div>
+        </div>
+      </div>
+      <button class="icon-btn" id="openOptions" type="button" title="设置">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.2.61.75 1.03 1.4 1.03H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+        </svg>
+      </button>
+    </header>
+
+    <main class="body">
+      <div class="alert" id="alert" hidden>
+        <span class="alert-text" id="alertText"></span>
+        <button type="button" class="alert-action" id="alertAction" hidden></button>
+      </div>
+
+      <button class="primary" id="toggleBtn" type="button">
+        <span id="toggleLabel">对照翻译此页面</span>
+      </button>
+      <p class="hint" id="progress">快捷键 Alt+T · 右键菜单也可触发</p>
+
+      <section class="field quick">
+        <div class="quick-head">
+          <label class="label" for="quickInput">快速翻译</label>
+          <span class="quick-lang">
+            <label class="label" for="quickTarget">译文语言</label>
+            <select id="quickTarget">
+              <option value="auto">自动（中 ⇄ 英）</option>
+              <option value="global">跟随设置</option>
+              <option value="简体中文">简体中文</option>
+              <option value="繁體中文">繁體中文</option>
+              <option value="English">English</option>
+              <option value="日本語">日本語</option>
+              <option value="한국어">한국어</option>
+              <option value="Français">Français</option>
+              <option value="Deutsch">Deutsch</option>
+              <option value="Español">Español</option>
+              <option value="Русский">Русский</option>
+            </select>
+          </span>
+        </div>
+
+        <textarea id="quickInput" rows="3" maxlength="5000" placeholder="输入或粘贴要翻译的文字"></textarea>
+
+        <p class="quick-pron" id="quickPron" hidden>
+          <span class="quick-phonetic" id="quickPhonetic"></span>
+          <span class="quick-pron-hint" id="quickPronHint"></span>
+        </p>
+
+        <div class="quick-actions">
+          <button type="button" class="primary compact" id="quickBtn">
+            <span class="spinner" id="quickSpinner" hidden aria-hidden="true"></span>
+            <span id="quickBtnLabel">翻译</span>
+          </button>
+          <button type="button" class="ghost" id="quickSpeak" title="朗读原文">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M11 5 6 9H2v6h4l5 4V5Z" /><path d="M15.5 8.5a5 5 0 0 1 0 7" /><path d="M18.5 5.5a9 9 0 0 1 0 13" />
+            </svg>
+            <span>朗读</span>
+          </button>
+          <button type="button" class="ghost" id="quickClear">清空</button>
+          <span class="quick-count" id="quickCount">Ctrl+Enter</span>
+        </div>
+
+        <p class="field-error" id="quickError" hidden>
+          <span id="quickErrorText"></span>
+          <button type="button" class="link" id="quickErrorAction" hidden>前往设置</button>
+        </p>
+
+        <div class="quick-result" id="quickResult" hidden>
+          <div class="quick-result-head">
+            <span id="quickResultLang">译文</span>
+            <button type="button" class="link" id="quickSave">加入生词本</button>
+            <button type="button" class="link" id="quickCopy">复制译文</button>
+          </div>
+          <p class="quick-result-text" id="quickOutput"></p>
+          <div class="quick-explain" id="quickExplain" hidden></div>
+          <button type="button" class="link quick-explain-btn" id="quickExplainBtn" hidden>详细解释</button>
+        </div>
+      </section>
+
+      <section class="field">
+        <span class="label" id="modeLabel">显示模式</span>
+        <div class="segmented" role="radiogroup" aria-labelledby="modeLabel">
+          <button type="button" data-mode="inline" role="radio" aria-checked="false">段落对照</button>
+          <button type="button" data-mode="columns" role="radio" aria-checked="false">左右并列</button>
+          <button type="button" data-mode="replace" role="radio" aria-checked="false">仅译文</button>
+        </div>
+      </section>
+
+      <section class="field">
+        <label class="switch">
+          <input type="checkbox" id="selectionEnabled" />
+          <span class="switch-track" aria-hidden="true"></span>
+          <span class="switch-text">
+            划词翻译
+            <em id="selectionTriggerText">选中文本后显示翻译按钮</em>
+          </span>
+        </label>
+        <label class="switch">
+          <input type="checkbox" id="autoSite" />
+          <span class="switch-track" aria-hidden="true"></span>
+          <span class="switch-text">
+            本站自动翻译
+            <em id="autoSiteText">打开该网站时自动开始翻译</em>
+          </span>
+        </label>
+      </section>
+    </main>
+
+    <section class="field">
+      <button type="button" class="ghost wide" id="openVocab">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+        </svg>
+        <span>生词本</span>
+        <span class="wide-meta" id="vocabMeta">—</span>
+      </button>
+    </section>
+
+    <footer class="foot">
+      <label class="foot-label" for="providerSelect">翻译接口</label>
+      <select id="providerSelect" class="provider-select"></select>
+      <button type="button" class="link" id="openOptions2">设置</button>
+    </footer>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>
