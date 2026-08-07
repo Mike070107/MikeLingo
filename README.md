@@ -214,13 +214,21 @@ $env:DEEPSEEK_API_KEY="sk-..."; node tools/real-api-test.cjs
 # 1. 改 MikeLingo/manifest.json 里的 version（顺手同步 package.json）
 node tools/pack.cjs        # 产出 Release/v<version>/：解压态副本 + zip + 一键升级.bat
 
-# 2. 发到 GitHub Releases（tag 必须是 v<version>，附件必须是 MikeLingo-v<version>.zip，
-#    设置页的「检查更新」就是按这两个规则找包的）
-gh release create v1.10.0 Release/v1.10.0/MikeLingo-v1.10.0.zip \
-  --title "v1.10.0" --notes-file <(sed -n '/## v1.10.0/,/## v1.9.1/p' CHANGELOG.md)
+# 2. 发到 GitHub Releases
+#    tag 必须是 v<version>，附件必须叫 MikeLingo-v<version>.zip——
+#    设置页的「检查更新」就是按这两条规则找包的，改了名字就找不到
+gh release create v1.10.0 Release/v1.10.0/MikeLingo-v1.10.0.zip --title "v1.10.0" --notes-file notes.md
 ```
 
-Release 的正文会原样显示在设置页的「更新说明」里，写清楚这版改了什么。
+`notes.md` 就是本次的更新说明（可以直接从 CHANGELOG 里对应小节复制），
+它会原样显示在设置页的「更新说明」里，写清楚这版改了什么。
+
+发完可以自查一遍：
+
+```bash
+gh release view v1.10.0 --json tagName,assets --jq '{tag: .tagName, assets: [.assets[].name]}'
+```
+
 
 改了 `tools/pack.cjs` 里的批处理模板后，`node tools/pack.cjs --bats` 可一次性刷新所有历史版本目录里的 bat。
 
