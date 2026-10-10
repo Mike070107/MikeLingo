@@ -1548,6 +1548,122 @@ async function waitFor(page, fn, timeout = 15000) {
     check('解包内容正确（deflate 与 store 两种都解得开）', pkg.sharedHead === '/*' && pkg.iconMagic === 'PNG', `${pkg.sharedHead} / ${pkg.iconMagic}`);
     check('发布包版本与 Release 标注一致', pkg.version === '99.0.0', pkg.version);
 
+    // 选目录：源码仓库是「项目根\MikeLingo\」两层同名结构，用户几乎必然选中外面那层。
+    // 真·文件选择器没法自动化，但出问题的是选完之后那段判断，拿假句柄直接喂它。
+    const resolveDir = await optionsPage.evaluate(async () => {
+      const updater = await import('./updater.js');
+      const name = chrome.runtime.getManifest().name;
+      // 用 OPFS 拿**浏览器原生的** FileSystemDirectoryHandle：和用户选目录拿到的是同一种对象，
+      // 不是自己拼的假货。原生文件选择器没法自动化，但选完之后的每一步都能这样真跑。
+      const root = await navigator.storage.getDirectory();
+      await root.remove?.({ recursive: true }).catch(() => {});
+      let seq = 0;
+      const mkDir = async (dirName, { manifest = null, children = [] } = {}) => {
+        // OPFS 里同名目录会复用，加个序号前缀隔开各用例；对外仍要露出原来的名字
+        const dir = await (await root.getDirectoryHandle(`case${seq++}`, { create: true }))
+          .getDirectoryHandle(dirName, { create: true });
+        if (manifest) {
+          const w = await (await dir.getFileHandle('manifest.json', { create: true })).createWritable();
+          await w.write(manifest);
+          await w.close();
+        }
+        for (const [childName, childManifest] of children) {
+          const child = await dir.getDirectoryHandle(childName, { create: true });
+          if (childManifest) {
+            const w = await (await child.getFileHandle('manifest.json', { create: true })).createWritable();
+            await w.write(childManifest);
+            await w.close();
+          }
+        }
+        return dir;
+      };
+      const extManifest = JSON.stringify({ name, version: '1.0.0' });
+      const tryResolve = async (dir) => {
+        try {
+          return { ok: true, name: (await updater.resolveInstallDir(dir)).name };
+        } catch (err) {
+          return { ok: false, msg: String(err.message) };
+        }
+      };
+
+      // 真跑一遍安装：下载 → 解包 → 写进这个真目录 → 再从目录里读回来核对
+      const realInstall = await (async () => {
+        try {
+          const dir = await mkDir(name, { manifest: extManifest });
+          const release = await updater.fetchLatestRelease('mock/v99.0.0');
+          const files = await updater.downloadPackage(release, () => {});
+          // 装之前先塞一个上一版留下的垃圾文件，看看会不会被清掉
+          const stale = await dir.getDirectoryHandle('src', { create: true });
+          await (await (await stale.getFileHandle('removed-in-new-version.js', { create: true })).createWritable()).close();
+
+          await updater.installFiles(dir, files, () => {});
+
+          const readText = async (p) => {
+            const parts = p.split('/');
+            let d = dir;
+            for (const part of parts.slice(0, -1)) d = await d.getDirectoryHandle(part);
+            return (await (await d.getFileHandle(parts.at(-1))).getFile()).text();
+          };
+          const staleGone = await (async () => {
+            try {
+              await stale.getFileHandle('removed-in-new-version.js');
+              return false;
+            } catch {
+              return true;
+            }
+          })();
+          return {
+            ok: true,
+            version: JSON.parse(await readText('manifest.json')).version,
+            sharedHead: (await readText('src/common/shared.js')).slice(0, 2),
+            staleGone
+          };
+        } catch (err) {
+          return { ok: false, msg: String(err.message) };
+        }
+      })();
+
+      return {
+        realInstall,
+        // 直接选中扩展本体
+        direct: await tryResolve(await mkDir(name, { manifest: extManifest })),
+        // 选中项目根（同名！里面是 README/tools/Release + 一个 MikeLingo 子目录）
+        repoRoot: await tryResolve(
+          await mkDir(name, { children: [['tools', null], ['Release', null], [name, extManifest]] })
+        ),
+        // 完全不相干的目录
+        unrelated: await tryResolve(await mkDir('Downloads', { children: [['foo', null]] })),
+        // 下面有多个候选时不瞎猜
+        ambiguous: await tryResolve(
+          await mkDir('backup', { children: [['MikeLingo', extManifest], ['MikeLingo-old', extManifest]] })
+        )
+      };
+    });
+    check(
+      '真的往原生目录句柄里装一遍（OPFS，非伪造）：文件写对、版本更新、旧文件清掉',
+      resolveDir.realInstall.ok &&
+        resolveDir.realInstall.version === '99.0.0' &&
+        resolveDir.realInstall.sharedHead === '/*' &&
+        resolveDir.realInstall.staleGone,
+      JSON.stringify(resolveDir.realInstall)
+    );
+    check('直接选中扩展目录时原样采用', resolveDir.direct.ok && resolveDir.direct.name === 'MikeLingo', JSON.stringify(resolveDir.direct));
+    check(
+      '选中同名的项目根目录时自动往下找一层',
+      resolveDir.repoRoot.ok && resolveDir.repoRoot.name === 'MikeLingo',
+      JSON.stringify(resolveDir.repoRoot)
+    );
+    check(
+      '选错不相干目录时报错并指明去哪儿看路径',
+      !resolveDir.unrelated.ok && resolveDir.unrelated.msg.includes('extensions') && resolveDir.unrelated.msg.includes('manifest.json'),
+      resolveDir.unrelated.msg
+    );
+    check(
+      '下面有多个候选时不瞎猜',
+      !resolveDir.ambiguous.ok && resolveDir.ambiguous.msg.includes('不止一个'),
+      resolveDir.ambiguous.msg
+    );
+
     // 安全校验：这些分支一旦失守就是"从网上下东西覆盖本机文件"，必须逐条测
     const guards = await optionsPage.evaluate(async (port) => {
       const updater = await import('./updater.js');

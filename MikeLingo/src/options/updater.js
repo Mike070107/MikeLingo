@@ -195,23 +195,52 @@ async function ensurePermission(handle) {
   return (await handle.requestPermission(opts)) === 'granted';
 }
 
-/** 确认这个目录确实是 MikeLingo 的安装目录，避免用户选错把别的文件夹写坏 */
+/** 读某个目录里的 manifest.json；不是本扩展的安装目录就返回 null（不抛错，给探测用） */
+async function readInstallManifest(dir) {
+  try {
+    const file = await (await dir.getFileHandle('manifest.json')).getFile();
+    const manifest = JSON.parse(await file.text());
+    return manifest?.name === chrome.runtime.getManifest().name ? manifest : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 把用户选的目录解析成真正的安装目录。
+ *
+ * 源码仓库是「项目根\MikeLingo\」这种两层同名结构，根目录里放的是 README / tools /
+ * Release，扩展本体在下一层。两层都叫 MikeLingo，用户几乎必然选中外面那层，
+ * 而报错里的目录名又恰好一模一样，看着像选对了——所以这里自己往下找一层，别让用户猜。
+ */
+export async function resolveInstallDir(dir) {
+  if (await readInstallManifest(dir)) return dir;
+
+  const matches = [];
+  try {
+    for await (const [, handle] of dir.entries()) {
+      if (handle.kind !== 'directory') continue;
+      if (await readInstallManifest(handle)) matches.push(handle);
+      if (matches.length > 1) break; // 多个候选就不猜了，交给用户
+    }
+  } catch {
+    /* 没有读取权限等情况：当作没找到，走下面的报错 */
+  }
+
+  if (matches.length === 1) return matches[0];
+
+  const name = chrome.runtime.getManifest().name;
+  throw new Error(
+    matches.length > 1
+      ? `「${dir.name}」下面有不止一个 ${name} 目录，无法判断该装哪个。请直接选扩展本体那层（里面是 manifest.json / src / icons）`
+      : `「${dir.name}」里没有 manifest.json，它下面一层也没找到 ${name}。请在 ${DST.extensionsPageUrl()} 上看 ${name} 卡片里的「来源」路径，选那个目录（里面应该是 manifest.json / src / icons 三项）`
+  );
+}
+
+/** 确认这个目录确实是本扩展的安装目录，避免写坏别的文件夹 */
 async function assertInstallDir(dir) {
-  let file;
-  try {
-    file = await (await dir.getFileHandle('manifest.json')).getFile();
-  } catch {
-    throw new Error(`「${dir.name}」里没有 manifest.json，这不是扩展的安装目录。请选 ${DST.extensionsPageUrl()} 里加载的那个 MikeLingo 目录`);
-  }
-  let manifest;
-  try {
-    manifest = JSON.parse(await file.text());
-  } catch {
-    throw new Error(`「${dir.name}」里的 manifest.json 无法解析，为安全起见已中止`);
-  }
-  if (manifest.name !== chrome.runtime.getManifest().name) {
-    throw new Error(`「${dir.name}」装的是「${manifest.name}」，不是 MikeLingo，已中止`);
-  }
+  const manifest = await readInstallManifest(dir);
+  if (!manifest) throw new Error(`「${dir.name}」不是 ${chrome.runtime.getManifest().name} 的安装目录，已中止`);
   return manifest.version;
 }
 
@@ -227,9 +256,10 @@ export async function pickInstallDir({ forcePick = false } = {}) {
       return saved;
     }
   }
-  const dir = await window.showDirectoryPicker({ id: 'mikelingo-install', mode: 'readwrite' });
-  if (!(await ensurePermission(dir))) throw new Error('没有拿到写入权限，无法安装');
-  await assertInstallDir(dir);
+  const picked = await window.showDirectoryPicker({ id: 'mikelingo-install', mode: 'readwrite' });
+  if (!(await ensurePermission(picked))) throw new Error('没有拿到写入权限，无法安装');
+  // 选到项目根也认：往下找一层。存句柄时存解析后的那个，下次就不用再找
+  const dir = await resolveInstallDir(picked);
   await writeHandle(dir);
   return dir;
 }

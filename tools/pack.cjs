@@ -26,6 +26,14 @@ const EXT_DIR = path.join(ROOT, 'MikeLingo'); // 主程序目录 = chrome://exte
 const RELEASE_DIR = path.join(ROOT, 'Release');
 const INCLUDE = ['manifest.json', 'src', 'icons'];
 
+// 安装器里要写死下载地址，仓库名从 shared.js 的默认设置里取，别在这儿另维护一份
+const REPO_SLUG = (function readRepoSlug() {
+  const src = fs.readFileSync(path.join(EXT_DIR, 'src/common/shared.js'), 'utf8');
+  const m = src.match(/updateRepo:\s*'([^']+)'/);
+  if (!m) throw new Error('没能从 src/common/shared.js 里读出 updateRepo，安装器的下载地址会是错的');
+  return m[1];
+})();
+
 /** 按各版本目录里的 manifest 重新生成「一键升级.bat」，改了下面的模板后用它统一刷新 */
 function writeAllBats() {
   for (const name of fs.readdirSync(RELEASE_DIR).sort()) {
@@ -68,6 +76,10 @@ function packRelease() {
   }
   fs.writeFileSync(path.join(outDir, zipName), zip);
   fs.writeFileSync(path.join(outDir, '一键升级.bat'), upgradeBat(version), 'utf8');
+  // 独立安装器：和 zip 一起上传到 Release，供"应用内更新卡死"的用户兜底。不进 zip，理由见 installerBat
+  // 文件名必须全 ASCII：GitHub 上传时会把资产名里的非 ASCII 字符直接剥掉，
+  // 叫「…-安装器.bat」传上去会变成「…-.bat」，用户根本看不出这是什么
+  fs.writeFileSync(path.join(outDir, `MikeLingo-v${version}-Installer.bat`), installerBat(version, REPO_SLUG), 'utf8');
 
   const rel = (p) => path.relative(ROOT, p).split(path.sep).join('/');
   console.log(`已发布 ${rel(outDir)}/`);
@@ -81,6 +93,127 @@ function packRelease() {
  * 路径全部基于 %~dp0（批处理自身所在目录）推导，项目文件夹整体搬家后依然可用。
  * 文件以 UTF-8 无 BOM 写出，配合首行 chcp 65001 保证中文提示不乱码。
  */
+/**
+ * 独立安装器，作为 Release 的**第二个资产**单独上传，不进 zip。
+ *
+ * 为什么不进 zip：updater.js 对包内路径有白名单（只允许 manifest.json / src/** / icons/**），
+ * 那是防「从网上下东西覆盖本机文件」的安全边界，往包里塞 bat 会让所有用户的应用内更新直接中止。
+ *
+ * 为什么需要它：应用内更新一旦卡住（选错目录、或安装目录命中 Chrome 的 File System Access
+ * 黑名单），修复本身又只能靠应用内更新送达 —— 死锁。用户必须有一条完全不依赖扩展的升级路径。
+ * Release/v<版本>/一键升级.bat 不算，那个靠仓库目录结构的相对路径定位，用户手上没有。
+ *
+ * 它自己下载 zip、自己解压、自己装，用户只需下这一个文件。
+ */
+function installerBat(ver, slug) {
+  const zipUrl = `https://github.com/${slug}/releases/download/v${ver}/MikeLingo-v${ver}.zip`;
+  return [
+    '@echo off',
+    'chcp 65001 >nul',
+    'setlocal enabledelayedexpansion',
+    `title MikeLingo v${ver} 安装器`,
+    '',
+    'echo.',
+    `echo   MikeLingo v${ver}  安装 / 升级`,
+    'echo   ------------------------------------------------',
+    'echo.',
+    '',
+    `set "ZIPURL=${zipUrl}"`,
+    `set "WORK=%TEMP%\\MikeLingo-v${ver}"`,
+    'set "PKG=%WORK%\\pkg"',
+    '',
+    'echo   正在下载 %ZIPURL%',
+    'if exist "%WORK%" rd /s /q "%WORK%"',
+    'mkdir "%PKG%" 2>nul',
+    'powershell -NoProfile -ExecutionPolicy Bypass -Command ^',
+    '  "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12;' +
+      ' try { Invoke-WebRequest -Uri $env:ZIPURL -OutFile ($env:WORK + \'\\pkg.zip\') -UseBasicParsing }' +
+      ' catch { Write-Host $_.Exception.Message; exit 1 }"',
+    'if errorlevel 1 (',
+    '  echo.',
+    '  echo   [失败] 下载失败。请检查网络 / 代理，或手动下载：',
+    '  echo   %ZIPURL%',
+    '  goto :end',
+    ')',
+    '',
+    'echo   正在解压…',
+    'powershell -NoProfile -ExecutionPolicy Bypass -Command ^',
+    '  "try { Expand-Archive -LiteralPath ($env:WORK + \'\\pkg.zip\') -DestinationPath $env:PKG -Force }' +
+      ' catch { Write-Host $_.Exception.Message; exit 1 }"',
+    'if errorlevel 1 (',
+    '  echo   [失败] 解压失败，安装包可能没下完整。',
+    '  goto :end',
+    ')',
+    '',
+    'set "SRC=%PKG%\\"',
+    'if not exist "%SRC%manifest.json" (',
+    '  echo   [失败] 安装包内容不对，缺 manifest.json。',
+    '  goto :end',
+    ')',
+    '',
+    'rem 目标目录：优先取拖拽进来的文件夹，否则让用户粘贴',
+    'set "DEST=%~1"',
+    'if "%DEST%"=="" (',
+    '  echo   请提供 MikeLingo 当前的安装目录。',
+    'echo   在浏览器打开 chrome://extensions（Edge 是 edge://extensions），',
+    'echo   打开右上角「开发者模式」，MikeLingo 卡片上会显示「来源 / 已加载路径」。',
+    '  echo.',
+    '  echo   把那个路径粘贴到这里回车（也可以直接把文件夹拖到本 bat 上运行）：',
+    '  set /p "DEST=> "',
+    ')',
+    '',
+    'rem 去掉粘贴路径时常见的首尾引号',
+    'set "DEST=%DEST:"=%"',
+    'if "%DEST%"=="" (',
+    '  echo   [取消] 没有输入路径。',
+    '  goto :end',
+    ')',
+    '',
+    'rem 用户很可能选到外面那层同名目录，这里自动往下找一层',
+    'if not exist "%DEST%\\manifest.json" (',
+    '  if exist "%DEST%\\MikeLingo\\manifest.json" (',
+    '    echo   [提示] 这是外层目录，已自动改用：%DEST%\\MikeLingo',
+    '    set "DEST=%DEST%\\MikeLingo"',
+    '  )',
+    ')',
+    '',
+    'if not exist "%DEST%\\manifest.json" (',
+    '  echo.',
+    '  echo   [失败] "%DEST%" 里没有 manifest.json，这不是扩展的安装目录。',
+    '  echo   正确的目录里应该能看到 manifest.json、src、icons 三项。',
+    '  goto :end',
+    ')',
+    '',
+    'echo.',
+    'echo   来源：%SRC%',
+    'echo   目标：%DEST%',
+    'echo.',
+    '',
+    'robocopy "%SRC%src" "%DEST%\\src" /MIR /NFL /NDL /NJH /NJS /NP >nul',
+    'if errorlevel 8 goto :fail',
+    'robocopy "%SRC%icons" "%DEST%\\icons" /MIR /NFL /NDL /NJH /NJS /NP >nul',
+    'if errorlevel 8 goto :fail',
+    'copy /y "%SRC%manifest.json" "%DEST%\\manifest.json" >nul',
+    'if errorlevel 1 goto :fail',
+    '',
+    `echo   [完成] 已安装 v${ver}。`,
+    'echo.',
+    'echo   接下来：回到扩展管理页，点 MikeLingo 卡片上的「刷新」按钮即可生效。',
+    'echo.',
+    'goto :end',
+    '',
+    ':fail',
+    'echo.',
+    'echo   [失败] 复制文件时出错。请确认浏览器没有正在占用该目录，或用管理员身份重试。',
+    '',
+    ':end',
+    'if exist "%WORK%" rd /s /q "%WORK%" 2>nul',
+    'echo.',
+    'pause',
+    ''
+  ].join('\r\n');
+}
+
 function upgradeBat(ver) {
   return [
     '@echo off',
