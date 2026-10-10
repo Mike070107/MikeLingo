@@ -2,6 +2,7 @@ import '../common/shared.js';
 import { VocabStore } from './vocab-store.js';
 import { Dictionary } from './dictionary.js';
 import { Speech } from './speech.js';
+import { Sync } from './sync.js';
 
 const DST = globalThis.DST;
 
@@ -203,6 +204,7 @@ async function explainText(text, { targetLang } = {}) {
 
   const base = await DST.loadSettings();
   const settings = targetLang ? DST.normalizeSettings(Object.assign({}, base, { targetLang })) : base;
+  limiter.configure(settings);
   // 详解可以指到与翻译不同的接口：翻译用 qwen-mt 这类专用模型，详解用通用对话模型
   const provider = DST.explainProvider(settings);
   const apiKey = await DST.loadApiKey(provider.id);
@@ -277,10 +279,12 @@ function parseSegments(output) {
 
 function friendlyHttpError(status, bodyText) {
   let detail = '';
+  let code = '';
   try {
     const json = JSON.parse(bodyText);
     detail = json?.error?.message || json?.message || json?.error || '';
     if (typeof detail !== 'string') detail = JSON.stringify(detail);
+    code = String(json?.error?.code || json?.code || '');
   } catch {
     detail = String(bodyText || '').slice(0, 300);
   }
@@ -291,18 +295,141 @@ function friendlyHttpError(status, bodyText) {
     403: '无权访问该模型或接口',
     404: '接口地址不存在，请检查设置页里该接口的 API 地址',
     422: '请求参数不合法',
-    429: '请求过于频繁，已触发限流',
+    429: '请求过于频繁，已触发限流，请到设置页把「并发请求数」调低或填写「每分钟请求上限」',
     500: '服务端错误，请稍后重试',
     503: '服务暂时不可用（可能是服务器繁忙）'
   };
-  const hint = hints[status] || '接口返回错误';
+  // 服务商常用 404 表示"模型名不存在"（阿里云百炼返回 model_not_found / Model not exist.），
+  // 按地址来提示会把人引到错的地方，所以这一种单独拎出来说模型
+  const hint =
+    status === 404 && /model/i.test(`${code} ${detail}`)
+      ? '该接口上没有这个模型，请检查设置页里该接口的模型名'
+      : hints[status] || '接口返回错误';
   const err = new Error(detail ? `${hint}（HTTP ${status}）：${detail}` : `${hint}（HTTP ${status}）`);
   err.status = status;
   return err;
 }
 
+/* -------------------------------- 请求闸门 -------------------------------- */
+
+/**
+ * 所有打到模型接口的请求都从这里过。
+ *
+ * 为什么必须有：页面侧的「并发请求数」只管同时发几批，实际瞬时并发会被放大好几倍——
+ * qwen-mt 这类翻译专用模型批内还要逐条单发，解析不全时的二分重试又会再叠一层，
+ * 加上多个标签页共用一个后台，设成 3 也可能一瞬间打出十几个请求，
+ * 阿里云百炼这种按 RPM 限流的服务商开整页翻译第一下就报 429。
+ *
+ * 闸门做三件事：
+ * 1. maxConcurrent —— 全局同时在飞的请求数封顶（取设置里的并发数，跨标签页共享）；
+ * 2. minInterval —— 两次请求之间的最小间隔，由「每分钟请求上限」换算，0 表示不限；
+ * 3. 自适应 —— 收到 429 就按 Retry-After（没有就指数退避）进入全局冷却，
+ *    并把间隔翻倍；连续成功若干次后再逐步降回去。
+ *    用户什么都不改也能自己收敛到服务商接受的速率，而不是把错误直接甩到页面上。
+ */
+const ADAPTIVE_MIN_INTERVAL = 300; // 首次触发限流后的起步间隔
+const ADAPTIVE_MAX_INTERVAL = 8000; // 间隔上限，再慢就该提示用户换模型或提额度了
+const ADAPTIVE_DECAY_AFTER = 8; // 连续成功多少次放宽一档
+
+const limiter = {
+  maxConcurrent: 3,
+  baseInterval: 0,
+  adaptiveInterval: 0,
+  cooldownUntil: 0,
+  running: 0,
+  lastStart: 0,
+  okStreak: 0,
+  waiters: [],
+  timer: null,
+
+  configure(settings) {
+    this.maxConcurrent = Math.max(1, Number(settings?.concurrency) || 1);
+    const rpm = Number(settings?.rpm) || 0;
+    this.baseInterval = rpm > 0 ? Math.ceil(60000 / rpm) : 0;
+  },
+
+  interval() {
+    return Math.max(this.baseInterval, this.adaptiveInterval);
+  },
+
+  async run(fn) {
+    await this.acquire();
+    try {
+      const result = await fn();
+      this.reward();
+      return result;
+    } finally {
+      this.release();
+    }
+  },
+
+  acquire() {
+    return new Promise((resolve) => {
+      this.waiters.push(resolve);
+      this.drain();
+    });
+  },
+
+  drain() {
+    if (this.timer) return; // 已经有定时器在等下一个发车时刻，到点再统一放行
+    while (this.waiters.length && this.running < this.maxConcurrent) {
+      const now = Date.now();
+      const wait = Math.max(this.cooldownUntil - now, this.lastStart + this.interval() - now);
+      if (wait > 0) {
+        this.timer = setTimeout(() => {
+          this.timer = null;
+          this.drain();
+        }, wait);
+        return;
+      }
+      this.running++;
+      this.lastStart = now;
+      this.waiters.shift()();
+    }
+  },
+
+  release() {
+    this.running = Math.max(0, this.running - 1);
+    this.drain();
+  },
+
+  /** 收到 429：全局冷却 + 放慢节奏。retryAfterMs 来自响应头，没有就用退避值 */
+  penalize(retryAfterMs) {
+    this.okStreak = 0;
+    this.adaptiveInterval = this.adaptiveInterval
+      ? Math.min(this.adaptiveInterval * 2, ADAPTIVE_MAX_INTERVAL)
+      : ADAPTIVE_MIN_INTERVAL;
+    const cool = Math.max(Number(retryAfterMs) || 0, this.adaptiveInterval);
+    this.cooldownUntil = Math.max(this.cooldownUntil, Date.now() + cool);
+    this.drain();
+  },
+
+  /** 连续成功就把自适应间隔慢慢还回去，别让一次限流永久拖慢后面所有页面 */
+  reward() {
+    if (!this.adaptiveInterval) return;
+    if (++this.okStreak < ADAPTIVE_DECAY_AFTER) return;
+    this.okStreak = 0;
+    this.adaptiveInterval =
+      this.adaptiveInterval <= ADAPTIVE_MIN_INTERVAL ? 0 : Math.floor(this.adaptiveInterval / 2);
+  }
+};
+
+/** Retry-After 可能是秒数，也可能是 HTTP 日期；上限 60 秒，免得挂在那儿不动 */
+function parseRetryAfter(response) {
+  const raw = response.headers.get('retry-after');
+  if (!raw) return 0;
+  const secs = Number(raw);
+  if (Number.isFinite(secs)) return Math.min(Math.max(secs, 0) * 1000, 60000);
+  const at = Date.parse(raw);
+  return Number.isFinite(at) ? Math.min(Math.max(at - Date.now(), 0), 60000) : 0;
+}
+
 /** provider: { baseUrl, model, temperature, timeout }；translationOptions 供 qwen-mt 类模型使用 */
-async function callChat(messages, provider, apiKey, { maxTokens, translationOptions } = {}) {
+function callChat(messages, provider, apiKey, options = {}) {
+  return limiter.run(() => callChatOnce(messages, provider, apiKey, options));
+}
+
+async function callChatOnce(messages, provider, apiKey, { maxTokens, translationOptions } = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), provider.timeout);
   const url = `${provider.baseUrl}/chat/completions`;
@@ -342,6 +469,10 @@ async function callChat(messages, provider, apiKey, { maxTokens, translationOpti
     const body = await response.text().catch(() => '');
     const err = friendlyHttpError(response.status, body);
     err.retryable = response.status === 429 || response.status >= 500;
+    if (response.status === 429) {
+      err.retryAfter = parseRetryAfter(response);
+      limiter.penalize(err.retryAfter); // 让还在排队的请求一起等，而不是接着打
+    }
     throw err;
   }
 
@@ -355,15 +486,29 @@ async function callChat(messages, provider, apiKey, { maxTokens, translationOpti
   return content;
 }
 
+/**
+ * 限流（429）单独给更多重试次数：它不是"错了"，只是"太快了"，
+ * 等一会儿必定能成，没必要按普通错误的次数直接放弃，让用户看见红字。
+ */
+const RATE_LIMIT_RETRIES = 5;
+
 async function withRetry(fn, settings) {
   let lastError;
-  for (let attempt = 0; attempt <= settings.maxRetries; attempt++) {
+  let attempt = 0;
+  for (;;) {
     try {
       return await fn();
     } catch (err) {
       lastError = err;
-      if (!err.retryable || attempt === settings.maxRetries) break;
-      await new Promise((r) => setTimeout(r, 800 * Math.pow(2, attempt)));
+      const rateLimited = err.status === 429;
+      const budget = rateLimited ? Math.max(settings.maxRetries, RATE_LIMIT_RETRIES) : settings.maxRetries;
+      if (!err.retryable || attempt >= budget) break;
+      // 429 的等待主要由闸门的全局冷却负责，这里再加一点抖动，避免几个并发请求同时醒来又撞一次
+      const delay = rateLimited
+        ? Math.max(err.retryAfter || 0, 600 * Math.pow(2, attempt)) + Math.random() * 400
+        : 800 * Math.pow(2, attempt);
+      await new Promise((r) => setTimeout(r, delay));
+      attempt++;
     }
   }
   throw lastError;
@@ -397,7 +542,9 @@ async function translateItemsMt(items, settings, provider, apiKey) {
     }
   };
 
-  await Promise.all(Array.from({ length: Math.min(MT_CONCURRENCY, items.length) }, worker));
+  // 真正的发送节奏由请求闸门统一控制，这里只是别一次性排出成百上千个等待者
+  const workers = Math.min(MT_CONCURRENCY, Math.max(1, settings.concurrency), items.length);
+  await Promise.all(Array.from({ length: workers }, worker));
   if (!results.size && errors.length) throw errors[0];
   return results;
 }
@@ -438,6 +585,7 @@ async function translateItems(items, settings, provider, apiKey, depth = 0) {
 async function translateTexts(texts, { targetLang } = {}) {
   const base = await DST.loadSettings();
   const settings = targetLang ? DST.normalizeSettings(Object.assign({}, base, { targetLang })) : base;
+  limiter.configure(settings); // 用户改了并发/RPM 立即生效，不用重载扩展
   const provider = DST.activeProvider(settings);
   const apiKey = await DST.loadApiKey(provider.id);
   if (!apiKey) {
@@ -613,10 +761,26 @@ async function openVocabPage(view) {
   await chrome.tabs.create({ url });
 }
 
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+/** 这些消息处理成功后本机数据变了，安排一次自动同步（内部有 8s 防抖，连着改不会打爆网盘） */
+const SYNC_TRIGGERS = new Set([
+  'VOCAB_ADD',
+  'VOCAB_REMOVE',
+  'VOCAB_UPDATE',
+  'VOCAB_GRADE',
+  'VOCAB_CLEAR',
+  'VOCAB_IMPORT',
+  'BACKUP_IMPORT'
+]);
+
+chrome.runtime.onMessage.addListener((msg, sender, rawSendResponse) => {
   if (msg?.target === 'offscreen') return false; // 发给 offscreen 文档的消息，这里不能抢答
 
   (async () => {
+    // 包一层：各 case 照常调 sendResponse，改动类消息顺带触发自动同步
+    const sendResponse = (payload) => {
+      if (payload?.ok && SYNC_TRIGGERS.has(msg?.type)) Sync.scheduleAutoSync();
+      return rawSendResponse(payload);
+    };
     try {
       switch (msg?.type) {
         case 'PING':
@@ -674,7 +838,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         case 'VOCAB_EXPORT':
           return sendResponse({ ok: true, data: await VocabStore.exportWords() });
         case 'VOCAB_IMPORT':
-          return sendResponse({ ok: true, result: await VocabStore.importWords(msg.payload) });
+          // 生词本页面的「导入 JSON」同样是用户手动还原，不受本机删除记录阻挡
+          return sendResponse({ ok: true, result: await VocabStore.importWords(msg.payload, { ignoreLocalTombstones: true }) });
         case 'OPEN_VOCAB':
           await openVocabPage(msg.view);
           return sendResponse({ ok: true });
@@ -706,11 +871,37 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         case 'OPEN_OPTIONS':
           chrome.runtime.openOptionsPage();
           return sendResponse({ ok: true });
+        case 'SYNC_GET_CONFIG':
+          return sendResponse({ ok: true, config: await Sync.getConfig(), state: await Sync.getState() });
+        case 'SYNC_SAVE_CONFIG':
+          return sendResponse({ ok: true, config: await Sync.saveConfig(msg.config || {}, msg.creds || {}) });
+        case 'SYNC_TEST':
+          return sendResponse({ ok: true, info: await Sync.testRemote() });
+        case 'SYNC_NOW': {
+          const result = await Sync.syncNow({ direction: msg.direction });
+          return sendResponse({ ok: true, result, state: await Sync.getState() });
+        }
+        case 'BACKUP_EXPORT':
+          return sendResponse({
+            ok: true,
+            data: await Sync.buildBackup({ includeSecrets: Boolean(msg.includeSecrets), passphrase: msg.passphrase || '' })
+          });
+        case 'BACKUP_IMPORT':
+          return sendResponse({
+            ok: true,
+            result: await Sync.applyBackup(msg.payload, { passphrase: msg.passphrase || '', manual: true })
+          });
         default:
           return sendResponse({ ok: false, error: `未知消息类型：${msg?.type}` });
       }
     } catch (err) {
-      sendResponse({ ok: false, error: err?.message || String(err), code: err?.code });
+      // retryable 让页面知道这批段落是"暂时失败"，可以排队重来，而不是永久丢掉
+      sendResponse({
+        ok: false,
+        error: err?.message || String(err),
+        code: err?.code,
+        retryable: Boolean(err?.retryable)
+      });
     }
   })();
   return true; // 异步响应
@@ -741,11 +932,45 @@ function createMenus() {
   });
 }
 
+/* ------------------------------ 自动同步触发 ------------------------------ */
+
+const SYNC_ALARM = 'mikelingo-sync';
+const SYNC_PERIOD_MINUTES = 30;
+
+/**
+ * 定时同步走 alarms 而不是 setInterval：service worker 闲置会被回收，
+ * setInterval 跟着一起没了，alarms 能把它叫醒。
+ *
+ * `alarms` 权限目前**没有声明**——云同步暂时不用，不值得为它多要一个权限
+ * （多一个权限，走商店渠道升级就要让所有用户重新授权一次）。
+ * 所以这里全部按"可能没有 chrome.alarms"来写：没有就退化成
+ * 「启动时 + 数据改动后」同步，少的只是那条 30 分钟的兜底。
+ * 将来要开定时同步，只需在 manifest 的 permissions 里加回 "alarms"，这段代码不用动。
+ */
+function ensureSyncAlarm() {
+  chrome.alarms?.create?.(SYNC_ALARM, { periodInMinutes: SYNC_PERIOD_MINUTES });
+}
+
+chrome.alarms?.onAlarm?.addListener((alarm) => {
+  if (alarm.name === SYNC_ALARM) Sync.runAutoSync();
+});
+
+// 设置在 storage.sync 里，弹窗、设置页、内容脚本改它都会走这里，比在每个入口埋钩子可靠
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'sync' && changes[DST.SETTINGS_KEY]) Sync.scheduleAutoSync();
+});
+
 chrome.runtime.onInstalled.addListener((details) => {
   createMenus();
+  ensureSyncAlarm();
   if (details.reason === 'install') chrome.runtime.openOptionsPage();
 });
-chrome.runtime.onStartup.addListener(createMenus);
+chrome.runtime.onStartup.addListener(() => {
+  createMenus();
+  ensureSyncAlarm();
+  // 开浏览器先拉一次：另一台机器昨晚加的词，今天一开就在
+  Sync.scheduleAutoSync(3000);
+});
 
 async function sendToTab(tabId, message, frameId) {
   try {

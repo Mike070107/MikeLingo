@@ -7,11 +7,18 @@
  * 排程逻辑在 ../common/schedule.js，页面预告下次复习时间时用的是同一份代码。
  */
 import { GRADES, MASTERED_INTERVAL, schedule, statusOf } from '../common/schedule.js';
+import { mergeTombstones, pruneTombstones } from '../common/backup.js';
 
 const DB_NAME = 'dst-vocab';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE = 'words';
 const DICT_STORE = 'dict'; // 词典查询结果缓存，免得同一个词反复打接口
+/**
+ * 删除墓碑：{ key, at }。
+ * 没有它，同步就是「只增不减」——在这台机器删掉的词，下次从另一台合并回来又活了。
+ * 记下"什么时候删的"，对面比对自己那条的 updatedAt 才知道该不该跟着删。
+ */
+const DELETED_STORE = 'deleted';
 
 const MAX_WORDS = 20000;
 const DICT_TTL = 180 * 24 * 3600 * 1000; // 音标基本不变，缓存半年
@@ -31,6 +38,10 @@ function openDB() {
         }
         if (!db.objectStoreNames.contains(DICT_STORE)) {
           db.createObjectStore(DICT_STORE, { keyPath: 'word' });
+        }
+        // v2 新增：老用户升级上来时只是多一个空 store，已有词条一条不动
+        if (!db.objectStoreNames.contains(DELETED_STORE)) {
+          db.createObjectStore(DELETED_STORE, { keyPath: 'key' });
         }
       };
       req.onsuccess = () => resolve(req.result);
@@ -56,7 +67,11 @@ function reqAsPromise(request) {
 
 /* --------------------------------- 词条读写 -------------------------------- */
 
-function normalizeEntry(raw) {
+/**
+ * keepUpdatedAt：同步/导入时必须保留对面那条的 updatedAt，
+ * 否则每次合并进来的词都显得"刚改过"，删除墓碑和后写优先就全失灵了。
+ */
+function normalizeEntry(raw, { keepUpdatedAt = false } = {}) {
   const word = String(raw.word || '').trim().slice(0, 200);
   const lang = raw.lang === 'zh' ? 'zh' : 'en';
   return {
@@ -73,7 +88,7 @@ function normalizeEntry(raw) {
     sourceTitle: String(raw.sourceTitle || '').trim().slice(0, 200),
     note: String(raw.note || '').trim().slice(0, 500),
     createdAt: Number(raw.createdAt) || Date.now(),
-    updatedAt: Date.now(),
+    updatedAt: (keepUpdatedAt && Number(raw.updatedAt)) || Date.now(),
     // 排程字段：新词立刻到期，加进来就能复习
     due: Number(raw.due) || Date.now(),
     interval: Number(raw.interval) || 0,
@@ -85,6 +100,26 @@ function normalizeEntry(raw) {
   };
 }
 
+/* -------------------------------- 删除墓碑 -------------------------------- */
+
+async function listTombstones() {
+  const db = await openDB();
+  const rows = (await reqAsPromise(tx(db, DELETED_STORE, 'readonly').getAll())) || [];
+  return pruneTombstones(rows);
+}
+
+async function markDeleted(keys, at = Date.now()) {
+  const db = await openDB();
+  const store = tx(db, DELETED_STORE, 'readwrite');
+  for (const key of keys) store.put({ key, at });
+}
+
+/** 词又被加回来了，墓碑就该撤掉，否则下次同步它会被对面的墓碑再删一遍 */
+async function unmarkDeleted(key) {
+  const db = await openDB();
+  await reqAsPromise(tx(db, DELETED_STORE, 'readwrite').delete(key));
+}
+
 async function addWord(raw) {
   const word = String(raw?.word || '').trim();
   if (!word) throw new Error('没有可加入的内容');
@@ -92,6 +127,7 @@ async function addWord(raw) {
 
   const db = await openDB();
   const key = `${raw.lang === 'zh' ? 'zh' : 'en'}|${word.toLowerCase()}`;
+  await unmarkDeleted(key);
   const existing = await reqAsPromise(tx(db, STORE, 'readonly').get(key));
   if (existing) {
     // 已存在就补齐上次没拿到的信息（比如当时音标还没查回来），不重置复习进度
@@ -125,6 +161,7 @@ async function getWord(key) {
 async function removeWord(key) {
   const db = await openDB();
   await reqAsPromise(tx(db, STORE, 'readwrite').delete(key));
+  await markDeleted([key]);
   return true;
 }
 
@@ -211,7 +248,10 @@ async function gradeWord(key, grade, now = Date.now()) {
 
 async function clearWords() {
   const db = await openDB();
+  // 先把 key 记成墓碑再清，否则"清空生词本"一同步就被对面原样还回来了
+  const keys = (await reqAsPromise(tx(db, STORE, 'readonly').getAllKeys())) || [];
   await reqAsPromise(tx(db, STORE, 'readwrite').clear());
+  await markDeleted(keys.map(String));
   return true;
 }
 
@@ -219,18 +259,38 @@ async function clearWords() {
 async function exportWords() {
   const items = await allWords();
   items.sort((a, b) => a.createdAt - b.createdAt);
-  return { version: 1, exportedAt: Date.now(), count: items.length, words: items };
+  return {
+    version: 2,
+    exportedAt: Date.now(),
+    count: items.length,
+    words: items,
+    deleted: await listTombstones()
+  };
 }
 
-/** 导入：同词按 createdAt 早的为准，复习进度取更靠前的（reps 多的） */
-async function importWords(payload) {
+/**
+ * 导入 / 同步合并。同词按 createdAt 早的为准，复习进度取更靠前的（reps 多的）——
+ * 不能按时间后写优先，否则在一台机器上背熟的词，被另一台的旧记录一盖就打回新词。
+ *
+ * `deleted` 是对面的删除墓碑：本机这条在它删掉之后没再动过，就跟着删；
+ * 动过（updatedAt 比墓碑晚，比如又重新加了一次）就留下，"用户后来的操作"优先。
+ *
+ * ignoreLocalTombstones：**手动导入备份文件时必须打开**。
+ * 自动同步要尊重本机的删除记录（否则在这台删掉的词会被另一台还回来），
+ * 但用户亲手点「导入备份」是明确的"把这份还原回来"，本机那些删除记录不该拦着他——
+ * 否则清空生词本后导入备份会一条都进不来，界面上还看不出为什么。
+ */
+async function importWords(payload, { ignoreLocalTombstones = false } = {}) {
   const list = Array.isArray(payload) ? payload : payload?.words;
   if (!Array.isArray(list)) throw new Error('文件格式不对，应为导出的 JSON（包含 words 数组）');
 
   const db = await openDB();
+  const incomingTombs = pruneTombstones(payload?.deleted);
+  const tombAt = new Map(incomingTombs.map((d) => [d.key, d.at]));
   let added = 0;
   let merged = 0;
   let skipped = 0;
+  let deleted = 0;
 
   for (const raw of list.slice(0, MAX_WORDS)) {
     const word = String(raw?.word || '').trim();
@@ -238,7 +298,12 @@ async function importWords(payload) {
       skipped++;
       continue;
     }
-    const entry = normalizeEntry(raw);
+    const entry = normalizeEntry(raw, { keepUpdatedAt: true });
+    // 对面把这条删了，而且删在它这次修改之后：这条根本不该进来
+    if (tombAt.has(entry.key) && tombAt.get(entry.key) >= entry.updatedAt) {
+      skipped++;
+      continue;
+    }
     const existing = await reqAsPromise(tx(db, STORE, 'readonly').get(entry.key));
     if (existing) {
       const keep = (Number(existing.reps) || 0) >= (Number(entry.reps) || 0) ? existing : entry;
@@ -252,16 +317,41 @@ async function importWords(payload) {
           explain: keep.explain || other.explain,
           context: keep.context || other.context,
           createdAt: Math.min(existing.createdAt, entry.createdAt),
-          updatedAt: Date.now()
+          updatedAt: Math.max(Number(existing.updatedAt) || 0, Number(entry.updatedAt) || 0)
         })
       );
       merged++;
     } else {
+      // 这条本机压根没有：只有在本机自己记了墓碑时才算"已删除"，否则就是新词
+      if (!ignoreLocalTombstones) {
+        const localTomb = await reqAsPromise(tx(db, DELETED_STORE, 'readonly').get(entry.key));
+        if (localTomb && (Number(localTomb.at) || 0) >= entry.updatedAt) {
+          skipped++;
+          continue;
+        }
+      }
+      await unmarkDeleted(entry.key);
       await reqAsPromise(tx(db, STORE, 'readwrite').put(entry));
       added++;
     }
   }
-  return { added, merged, skipped };
+
+  // 对面删掉的，本机还留着且此后没动过，跟着删
+  for (const { key, at } of incomingTombs) {
+    const existing = await reqAsPromise(tx(db, STORE, 'readonly').get(key));
+    if (existing && (Number(existing.updatedAt) || 0) <= at) {
+      await reqAsPromise(tx(db, STORE, 'readwrite').delete(key));
+      deleted++;
+    }
+  }
+  // 两侧墓碑取并集后落盘，这台机器才能把删除继续传给第三台设备
+  if (incomingTombs.length) {
+    const nextTombs = mergeTombstones(await listTombstones(), incomingTombs);
+    const store = tx(db, DELETED_STORE, 'readwrite');
+    for (const d of nextTombs) store.put(d);
+  }
+
+  return { added, merged, skipped, deleted };
 }
 
 /* ------------------------------- 词典缓存 ------------------------------- */
@@ -304,6 +394,7 @@ export const VocabStore = {
   clearWords,
   exportWords,
   importWords,
+  listTombstones,
   dictCacheGet,
   dictCachePut
 };

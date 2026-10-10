@@ -306,12 +306,26 @@
     const res = await send({ type: 'TRANSLATE', texts: batch.map((b) => b.text) });
     if (state.stopped || session !== state.session) return;
     if (!res.ok) {
-      state.error = res.error || '翻译失败';
-      state.done += batch.length;
       if (res.code === 'NO_API_KEY') {
+        state.error = res.error || '翻译失败';
+        state.done += batch.length;
         state.stopped = true;
         state.queue.length = 0;
+        updateHud();
+        return;
       }
+      // 限流 / 超时 / 网络抖动这类暂时性失败：后台已经退避重试过，这里再给一次机会，
+      // 把这批段落放回队尾重排（每段只补一次），否则整页会永久留下一块没译的空白。
+      if (res.retryable && batch.every((b) => !b.retried)) {
+        for (const block of batch) {
+          block.retried = true;
+          state.queue.push(block);
+        }
+        updateHud();
+        return;
+      }
+      state.error = res.error || '翻译失败';
+      state.done += batch.length;
       updateHud();
       return;
     }

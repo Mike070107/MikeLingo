@@ -1,6 +1,7 @@
 /**
  * 端到端验证：加载未打包扩展 + 本地假接口，真实跑一遍段落对照 / 左右并列 / 划词翻译。
- * 用法：node tools/e2e-test.cjs [--headful]
+ * 用法：node tools/e2e-test.cjs [--headful] [--edge]
+ *   --edge  换成本机安装的 Microsoft Edge 跑同一套断言（同一份 Chromium 内核，验证兼容性）
  */
 const path = require('path');
 const fs = require('fs');
@@ -8,9 +9,24 @@ const { spawn } = require('child_process');
 const puppeteer = require('puppeteer');
 
 const EXT_PATH = path.join(__dirname, '..', 'MikeLingo');
-const SHOT_DIR = path.join(__dirname, 'screenshots');
 const PORT = 8787;
 const PAGE_URL = `http://127.0.0.1:${PORT}/test.html`;
+
+const USE_EDGE = process.argv.includes('--edge');
+// Edge 的截图单放一层，免得和 Chrome 的互相覆盖、看不出是哪家浏览器出的问题
+const SHOT_DIR = path.join(__dirname, 'screenshots', ...(USE_EDGE ? ['edge'] : []));
+
+/** Edge 的安装位置：64 位机器上稳定版在 Program Files (x86)，尊重环境变量覆盖 */
+function findEdge() {
+  const candidates = [
+    process.env.EDGE_PATH,
+    'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+    'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe'
+  ].filter(Boolean);
+  const hit = candidates.find((p) => fs.existsSync(p));
+  if (!hit) throw new Error(`没找到 Edge，可用 EDGE_PATH 指定：${candidates.join(' / ')}`);
+  return hit;
+}
 
 const results = [];
 function check(name, ok, detail) {
@@ -60,8 +76,62 @@ async function useMockDictionary(worker, port) {
 }
 
 /** service worker 收不到自己发的消息，借一个普通扩展页面发 */
+/**
+ * 截图只是排查用的产物，不是断言。机器一忙 captureScreenshot 就可能超时，
+ * 让它把 150 条断言一起带走完全不值——截不出来就记一行警告继续跑。
+ */
+async function shot(target, name, options = {}) {
+  try {
+    await target.screenshot({ path: path.join(SHOT_DIR, name), ...options });
+  } catch (err) {
+    console.log(`WARN  截图 ${name} 失败（不影响断言）— ${err?.message || err}`);
+  }
+}
+
 function askBackground(somePage, message) {
   return somePage.evaluate(async (msg) => chrome.runtime.sendMessage(msg), message);
+}
+
+/* ------------------------- 同步测试用的小工具（Node 侧） ------------------------ */
+
+const { webcrypto } = require('crypto');
+
+/**
+ * 在 Node 里按扩展的格式加密一段 JSON，用来伪造"另一台机器写上去的"远端文件。
+ * 参数必须和 src/common/crypto.js 完全一致，否则测的就不是同一套格式了。
+ */
+async function encryptLikeExtension(value, passphrase) {
+  const enc = new TextEncoder();
+  const salt = webcrypto.getRandomValues(new Uint8Array(16));
+  const iv = webcrypto.getRandomValues(new Uint8Array(12));
+  const material = await webcrypto.subtle.importKey('raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveKey']);
+  const key = await webcrypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt, iterations: 310000, hash: 'SHA-256' },
+    material,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt']
+  );
+  const data = new Uint8Array(await webcrypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, enc.encode(JSON.stringify(value))));
+  const b64 = (bytes) => Buffer.from(bytes).toString('base64');
+  return { alg: 'AES-GCM-256', kdf: 'PBKDF2-SHA256', iter: 310000, salt: b64(salt), iv: b64(iv), data: b64(data) };
+}
+
+const DAV_AUTH = 'Basic ' + Buffer.from('mikeuser:mikepass').toString('base64');
+
+async function davGet(port, name) {
+  const res = await fetch(`http://127.0.0.1:${port}/dav/${name}`, { headers: { Authorization: DAV_AUTH } });
+  if (res.status === 404) return null;
+  return JSON.parse(await res.text());
+}
+
+async function davPut(port, name, obj) {
+  const res = await fetch(`http://127.0.0.1:${port}/dav/${name}`, {
+    method: 'PUT',
+    headers: { Authorization: DAV_AUTH, 'Content-Type': 'application/json' },
+    body: JSON.stringify(obj)
+  });
+  if (!res.ok) throw new Error(`假 WebDAV 写入失败：${res.status}`);
 }
 
 async function toggle(worker) {
@@ -104,10 +174,13 @@ async function waitFor(page, fn, timeout = 15000) {
   const mock = spawn(process.execPath, [path.join(__dirname, 'mock-server.cjs'), String(PORT)], { stdio: 'inherit' });
   await sleep(800);
 
+  if (USE_EDGE) console.log(`浏览器：Microsoft Edge（${findEdge()}）`);
+
   const browser = await puppeteer.launch({
     headless: false,
-    // 整页截图在机器忙的时候会超过默认的 30s，超时会把整轮测试打断
-    protocolTimeout: 120000,
+    ...(USE_EDGE ? { executablePath: findEdge() } : {}),
+    // 整页截图在机器忙的时候很慢，默认 30s 远不够；截图另有 shot() 兜底，超时也不会打断整轮
+    protocolTimeout: 180000,
     args: [
       `--disable-extensions-except=${EXT_PATH}`,
       `--load-extension=${EXT_PATH}`,
@@ -142,7 +215,7 @@ async function waitFor(page, fn, timeout = 15000) {
       (document.querySelector('.dst-ui')?.shadowRoot?.querySelector('.hud')?.textContent || '').includes('API Key')
     );
     check('未配置密钥时提示前往设置', noKeyOk);
-    await page.screenshot({ path: path.join(SHOT_DIR, '1-no-key.png') });
+    await shot(page, '1-no-key.png');
     await toggle(worker); // 还原
 
     /* --- 2. 段落对照 --- */
@@ -176,7 +249,7 @@ async function waitFor(page, fn, timeout = 15000) {
     check('虚线样式生效', inlineInfo.decoration === 'dashed', inlineInfo.decoration);
     check('中文字体回退生效', /PingFang|YaHei|Noto Sans SC/i.test(inlineInfo.fontFamily), inlineInfo.fontFamily);
     check('HUD 显示完成状态', /已翻译|正在翻译/.test(inlineInfo.hud), inlineInfo.hud.replace(/\s+/g, ' '));
-    await page.screenshot({ path: path.join(SHOT_DIR, '2-inline.png'), fullPage: true });
+    await shot(page, '2-inline.png', { fullPage: true });
 
     /* --- 3. 还原原文 --- */
     await toggle(worker);
@@ -225,7 +298,7 @@ async function waitFor(page, fn, timeout = 15000) {
     check('列表项仍保留项目符号', colInfo?.listDisplay === 'list-item', colInfo?.listDisplay);
     check('原文只包一层，未被拆成多列', colInfo?.originCount === 1, `wrappers=${colInfo?.originCount}`);
     check('原文与译文左右同排', Boolean(colInfo?.sameRow && colInfo?.leftRight), `宽度 ${colInfo?.widths?.join(' / ')}`);
-    await page.screenshot({ path: path.join(SHOT_DIR, '3-columns.png'), fullPage: true });
+    await shot(page, '3-columns.png', { fullPage: true });
     await toggle(worker);
     await sleep(300);
     const colRestored = await page.evaluate(() => ({
@@ -256,7 +329,7 @@ async function waitFor(page, fn, timeout = 15000) {
       };
     });
     check('仅译文模式隐藏原文', replaceInfo.originHidden, `可见文本「${replaceInfo.visible}」`);
-    await page.screenshot({ path: path.join(SHOT_DIR, '4-replace.png') });
+    await shot(page, '4-replace.png');
     await toggle(worker);
     await sleep(300);
 
@@ -289,7 +362,7 @@ async function waitFor(page, fn, timeout = 15000) {
     check('划词翻译弹出译文卡片', cardOk, cardInfo.text.slice(0, 40));
     check('卡片完整位于可视区内', cardInfo.inViewport);
     check('卡片提供复制按钮', cardInfo.hasCopy);
-    await page.screenshot({ path: path.join(SHOT_DIR, '5-selection.png') });
+    await shot(page, '5-selection.png');
 
     // 整页翻译后再划词，选区不应把注入的译文一起当作原文
     await toggle(worker);
@@ -353,7 +426,7 @@ async function waitFor(page, fn, timeout = 15000) {
       (document.querySelector('.dst-ui')?.shadowRoot?.querySelector('.card-result')?.textContent || '').includes('译文')
     );
     check('点击划词按钮弹出译文卡片', btnCardOk);
-    await page.screenshot({ path: path.join(SHOT_DIR, '5b-selection-button.png') });
+    await shot(page, '5b-selection-button.png');
 
     /* --- 6c. 输入框内选中文本 --- */
     await page.evaluate(() => {
@@ -454,7 +527,7 @@ async function waitFor(page, fn, timeout = 15000) {
       (document.querySelector('.dst-ui')?.shadowRoot?.querySelector('.card-lang')?.textContent || '').includes('简体中文')
     );
     check('划词选中英文时译成中文', enToZh);
-    await page.screenshot({ path: path.join(SHOT_DIR, '5c-selection-lang.png') });
+    await shot(page, '5c-selection-lang.png');
 
     /* --- 7. 接口报错时透传真实错误（换模型名以绕开缓存，确保真的走接口） --- */
     await applySettings(worker, { model: 'mock-model-uncached' }, 'bad-key');
@@ -468,7 +541,7 @@ async function waitFor(page, fn, timeout = 15000) {
       () => document.querySelector('.dst-ui')?.shadowRoot?.querySelector('.hud')?.textContent?.replace(/\s+/g, ' ').trim() || ''
     );
     check('接口错误透传原始信息', errOk, errText.slice(0, 120));
-    await page.screenshot({ path: path.join(SHOT_DIR, '6-error.png') });
+    await shot(page, '6-error.png');
 
     /* --- 8. 设置页与弹窗渲染 --- */
     const extId = new URL(swTarget.url()).host;
@@ -501,7 +574,7 @@ async function waitFor(page, fn, timeout = 15000) {
     check('设置页密钥输入为 password', optionsInfo.keyType === 'password');
     check('设置页读取缓存条目', /缓存条目：\d/.test(optionsInfo.cache), optionsInfo.cache);
     check('启用中的接口默认展开并标注', optionsInfo.expanded && optionsInfo.badge, `共 ${optionsInfo.count} 个接口`);
-    await optionsPage.screenshot({ path: path.join(SHOT_DIR, '7-options.png'), fullPage: true });
+    await shot(optionsPage, '7-options.png', { fullPage: true });
 
     const popupPage = await browser.newPage();
     await popupPage.goto(`chrome-extension://${extId}/src/popup/popup.html`, { waitUntil: 'networkidle2' });
@@ -552,7 +625,7 @@ async function waitFor(page, fn, timeout = 15000) {
       alertInfo.hidden && alertInfo.alertHeight === 0 && alertInfo.errorHeight === 0,
       `alert=${alertInfo.alertHeight}px error=${alertInfo.errorHeight}px`
     );
-    await popupPage.screenshot({ path: path.join(SHOT_DIR, '9-popup-quick.png') });
+    await shot(popupPage, '9-popup-quick.png');
 
     // 中文输入在「自动」模式下应译成英文而不是原样返回
     await popupPage.evaluate(() => {
@@ -592,7 +665,7 @@ async function waitFor(page, fn, timeout = 15000) {
       action: !document.getElementById('quickErrorAction').hidden
     }));
     check('未配置密钥时快速翻译给出行内错误', !quickErr.hidden && quickErr.action, quickErr.text);
-    await popupPage.screenshot({ path: path.join(SHOT_DIR, '10-popup-quick-error.png') });
+    await shot(popupPage, '10-popup-quick-error.png');
 
     /* --- 10. 多接口：新增、互斥启用、密钥各自独立 --- */
     await applySettings(worker, {}, 'sk-mock-key-123456');
@@ -642,7 +715,11 @@ async function waitFor(page, fn, timeout = 15000) {
         baseUrl.value = value;
         baseUrl.dispatchEvent(new Event('input', { bubbles: true }));
       };
-      const listOf = (el) => Array.from(el.querySelectorAll('option')).map((o) => o.value);
+      // 下拉里固定有「自定义…」（和详解那边的「跟随该接口的模型」空项），不算候选模型
+      const listOf = (el) =>
+        Array.from(el.querySelectorAll('option'))
+          .map((o) => o.value)
+          .filter((v) => v && v !== '__custom__');
       const explainList = () => listOf(document.getElementById('explainModels'));
       const rowList = () => listOf(li.querySelector('.p-models'));
 
@@ -656,12 +733,14 @@ async function waitFor(page, fn, timeout = 15000) {
       const deepseek = { row: rowList(), explain: explainList() };
       setUrl('https://dashscope.aliyuncs.com/compatible-mode/v1');
       const dashscope = { row: rowList(), explain: explainList() };
+      setUrl('https://llm-abc123.cn-beijing.maas.aliyuncs.com/compatible-mode/v1'); // 百炼专属部署
+      const maas = { row: rowList(), explain: explainList() };
       setUrl('http://127.0.0.1:9'); // 认不出的自定义地址：不瞎猜，留空让用户自己填
       const unknown = { row: rowList(), explain: explainList() };
 
       select.value = '';
       select.dispatchEvent(new Event('change', { bubbles: true }));
-      return { openai, deepseek, dashscope, unknown };
+      return { openai, deepseek, dashscope, maas, unknown };
     });
     check(
       '翻译模型候选跟随该接口的 API 地址',
@@ -676,17 +755,136 @@ async function waitFor(page, fn, timeout = 15000) {
       modelOptions.deepseek.explain.includes('deepseek-chat') &&
         !modelOptions.deepseek.explain.includes('gpt-4o-mini') &&
         modelOptions.dashscope.explain.includes('qwen-plus') &&
-        !modelOptions.dashscope.explain.includes('qwen-mt-turbo') &&
-        modelOptions.dashscope.row.includes('qwen-mt-turbo'), // 翻译那栏仍可选 MT
+        !modelOptions.dashscope.explain.includes('qwen-mt-flash') &&
+        modelOptions.dashscope.row.includes('qwen-mt-flash'), // 翻译那栏仍可选 MT
       `deepseek=${modelOptions.deepseek.explain} dashscope=${modelOptions.dashscope.explain}`
+    );
+    check(
+      '百炼专属部署地址也能认出通义的候选模型',
+      modelOptions.maas.row.includes('qwen-plus') && modelOptions.maas.row.includes('qwen-mt-flash'),
+      `maas=${modelOptions.maas.row}`
     );
     check(
       '地址认不出时不给候选模型',
       modelOptions.unknown.row.length === 0 && modelOptions.unknown.explain.length === 0,
       `row=${modelOptions.unknown.row} explain=${modelOptions.unknown.explain}`
     );
+    // 回归：框里存着一个已下线的旧模型名时，候选照样要能选中
+    // （以前是 input+datalist，datalist 会按框里的文字过滤，一条都不剩 = 用户眼里的「下拉点不开」）
+    const staleModel = await optionsPage.evaluate(async () => {
+      const li = document.querySelectorAll('.provider')[1];
+      const baseUrl = li.querySelector('.p-baseUrl');
+      const select = li.querySelector('.p-models');
+      const input = li.querySelector('.p-model');
 
-    await optionsPage.screenshot({ path: path.join(SHOT_DIR, '11-options-providers.png'), fullPage: true });
+      // 这一行的地址/模型后面还有用例依赖（B 接口必须留在死端口），用完必须原样还原
+      const origUrl = baseUrl.value;
+      const origModel = input.value;
+
+      baseUrl.value = 'https://llm-abc123.cn-beijing.maas.aliyuncs.com/compatible-mode/v1';
+      baseUrl.dispatchEvent(new Event('input', { bubbles: true }));
+      input.value = 'qwen-mt-turbo'; // 已下线，不在候选里
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+
+      const stale = {
+        picked: select.value,
+        inputShown: !input.hidden,
+        selectShown: !select.hidden,
+        count: select.querySelectorAll('option').length
+      };
+
+      // 从下拉里挑一个候选，应当写回输入框并收起手填框
+      select.value = 'qwen-plus';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 50));
+      const after = { model: input.value, inputShown: !input.hidden, picked: select.value };
+
+      window.__restoreModelRow = () => {
+        baseUrl.value = origUrl;
+        baseUrl.dispatchEvent(new Event('input', { bubbles: true }));
+        input.value = origModel;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+        return { url: baseUrl.value, model: input.value };
+      };
+      return { stale, after };
+    });
+    // 下拉可见时长什么样，得真看一眼（上面那张整页图是"地址认不出、只剩手填框"的状态）
+    await shot(optionsPage, '11b-model-picker.png');
+    staleModel.restored = await optionsPage.evaluate(() => window.__restoreModelRow());
+    check(
+      '框里是已下线的旧模型名时，候选下拉仍可选',
+      staleModel.stale.picked === '__custom__' &&
+        staleModel.stale.inputShown &&
+        staleModel.stale.selectShown &&
+        staleModel.stale.count > 2,
+      `选中=${staleModel.stale.picked} 手填框可见=${staleModel.stale.inputShown} 候选项=${staleModel.stale.count}`
+    );
+    check(
+      '下拉选了候选模型会写回并收起手填框',
+      staleModel.after.model === 'qwen-plus' && !staleModel.after.inputShown,
+      `model=${staleModel.after.model} 手填框可见=${staleModel.after.inputShown}`
+    );
+    check(
+      '这组用例已还原该接口的地址与模型（后面的用例依赖它）',
+      staleModel.restored.url === 'http://127.0.0.1:9',
+      JSON.stringify(staleModel.restored)
+    );
+
+    await shot(optionsPage, '11-options-providers.png', { fullPage: true });
+
+    /* 接口卡片的精简布局：常用的两样留在外面，其余收进「更多设置」 */
+    const layout = await optionsPage.evaluate(() => {
+      const li = document.querySelector('.provider .provider-body:not([hidden])')?.closest('.provider');
+      if (!li) return null;
+      const body = li.querySelector('.provider-body');
+      const adv = li.querySelector('.p-adv');
+      // 只看直接摆在外面的字段（不含折叠区里的）
+      const topLevel = [...body.children]
+        .filter((el) => el.classList.contains('field'))
+        .map((el) => el.querySelector('label')?.textContent.trim());
+      const keyRow = li.querySelector('.p-key').closest('.input-row');
+      return {
+        topLevel,
+        advOpen: adv.open,
+        advFields: [...adv.querySelectorAll('.field label')].map((l) => l.textContent.trim()),
+        saveInKeyRow: Boolean(keyRow.querySelector('.p-save')),
+        saveAfterInput: [...keyRow.children].indexOf(keyRow.querySelector('.p-save')) >
+          [...keyRow.children].indexOf(li.querySelector('.p-key'))
+      };
+    });
+    check('接口卡片外层只留「模型」和「API Key」', JSON.stringify(layout?.topLevel) === '["模型","API Key"]', JSON.stringify(layout?.topLevel));
+    check('名称 / 地址 / 温度 / 超时收进「更多设置」且默认折叠', layout?.advOpen === false && layout.advFields.length === 4, `${layout?.advFields?.join('、')}`);
+    check('保存按钮就在 API Key 输入框后面', layout?.saveInKeyRow === true && layout?.saveAfterInput === true, JSON.stringify(layout));
+
+    // 折叠区里的字段要能正常展开使用，不能只是藏起来
+    const advUsable = await optionsPage.evaluate(() => {
+      const li = document.querySelector('.provider .provider-body:not([hidden])').closest('.provider');
+      const adv = li.querySelector('.p-adv');
+      adv.open = true;
+      const url = li.querySelector('.p-baseUrl');
+      return { visible: url.offsetParent !== null, value: url.value };
+    });
+    check('展开「更多设置」后地址字段可见可编辑', advUsable.visible === true && advUsable.value.startsWith('http'), advUsable.value);
+
+    // 贴着 Key 的那个保存按钮要真的存下东西，而不是个摆设
+    await optionsPage.evaluate(() => {
+      const li = document.querySelector('.provider .provider-body:not([hidden])').closest('.provider');
+      const key = li.querySelector('.p-key');
+      key.value = 'sk-inline-save-check';
+      key.dispatchEvent(new Event('input', { bubbles: true }));
+      li.querySelector('.p-save').click();
+    });
+    await sleep(1200);
+    const inlineSaved = await optionsPage.evaluate(() => {
+      // 提示写在"当前展开的那个接口"里，不能拿第一个 .p-saveresult 顶包
+      const li = document.querySelector('.provider .provider-body:not([hidden])')?.closest('.provider');
+      const el = li?.querySelector('.p-saveresult');
+      return { text: el?.textContent.trim() || '', ok: Boolean(el?.classList.contains('ok')) };
+    });
+    const inlineStored = await worker.evaluate(async () => (await chrome.storage.local.get('apiKeys')).apiKeys || {});
+    check('Key 旁边的「保存」真的把密钥存下来了', Object.values(inlineStored).includes('sk-inline-save-check'), Object.keys(inlineStored).join(','));
+    check('保存后在原地给出反馈', inlineSaved.ok === true && inlineSaved.text.includes('已保存'), inlineSaved.text);
 
     await optionsPage.click('#saveBtn');
     await sleep(800);
@@ -728,7 +926,7 @@ async function waitFor(page, fn, timeout = 15000) {
     await sleep(600);
     const switched = await worker.evaluate(async () => (await chrome.storage.sync.get('settings')).settings.activeProviderId);
     check('弹窗可切换启用的接口', optionCount === 2 && switched === 'deepseek', `选项 ${optionCount} 个，当前 ${switched}`);
-    await popupPage.screenshot({ path: path.join(SHOT_DIR, '12-popup-provider.png') });
+    await shot(popupPage, '12-popup-provider.png');
 
     await page.bringToFront();
     await page.reload({ waitUntil: 'domcontentloaded' });
@@ -759,7 +957,7 @@ async function waitFor(page, fn, timeout = 15000) {
     check('未把目标语言写成 system 提示词', !mtInfo.withSystem);
     check('未使用 <seg> 分段协议（逐条发送）', !mtInfo.withSeg);
     check('目标语言按 qwen-mt 语言名传递', mtInfo.sample.startsWith('【MT:Chinese】'), mtInfo.sample.slice(0, 20));
-    await page.screenshot({ path: path.join(SHOT_DIR, '13-qwen-mt.png') });
+    await shot(page, '13-qwen-mt.png');
     await toggle(worker);
 
     // 设置页对该模型给出提示，且测试请求也走同一套调用方式
@@ -807,6 +1005,45 @@ async function waitFor(page, fn, timeout = 15000) {
     const legacyWorks = await waitFor(page, () => document.querySelectorAll('dst-trans').length >= 5);
     check('旧版配置无需重设即可继续翻译', legacyWorks);
     await toggle(worker);
+
+    /* --- 12.5 服务商限流（HTTP 429）能自己退避到成功 --- */
+    // 真实事故：阿里云百炼按 RPM 卡，整页翻译一开就把额度打满，页面直接红字报 429。
+    // 这里把假服务端设成"两次请求间隔小于 400ms 就回 429"，扩展必须自己放慢并把整页译完。
+    await optionsPage.evaluate(async () => chrome.runtime.sendMessage({ type: 'CACHE_CLEAR' }));
+    await fetch(`http://127.0.0.1:${PORT}/__ratelimit?minGapMs=400`);
+    await applySettings(
+      worker,
+      {
+        baseUrl: `http://127.0.0.1:${PORT}`,
+        model: 'mock-model-ratelimit',
+        // 故意配成最容易打爆的组合：高并发 + 每批一段
+        concurrency: 5,
+        batchSize: 1,
+        batchChars: 6000,
+        rpm: 0,
+        maxRetries: 2
+      },
+      'sk-mock-key-123456'
+    );
+    await page.bringToFront();
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await sleep(500);
+    await toggle(worker);
+    const rateOk = await waitFor(page, () => document.querySelectorAll('dst-trans').length >= 5, 60000);
+    const rateInfo = await page.evaluate(() => ({
+      count: document.querySelectorAll('dst-trans').length,
+      hud: document.querySelector('.dst-ui')?.shadowRoot?.querySelector('.hud')?.textContent?.replace(/\s+/g, ' ').trim() || ''
+    }));
+    const rateStats = await (await fetch(`http://127.0.0.1:${PORT}/__ratelimit/stats`)).json();
+    check(
+      '触发 429 后自动放慢并把整页译完',
+      rateOk && !/限流|翻译出错/.test(rateInfo.hud),
+      `译出 ${rateInfo.count} 段，被拒 ${rateStats.rejected} 次，HUD：${rateInfo.hud.slice(0, 50)}`
+    );
+    check('假服务端确实拒绝过请求（用例有效）', rateStats.rejected > 0, `429 ${rateStats.rejected} 次`);
+    await toggle(worker);
+    await fetch(`http://127.0.0.1:${PORT}/__ratelimit?minGapMs=0`); // 关掉限流，别影响后面的用例
+    await applySettings(worker, { concurrency: 3, batchSize: 10, batchChars: 1800 });
 
     /* --- 13. 音标 / 朗读 / 生词本 --- */
     await useMockDictionary(worker, PORT);
@@ -886,7 +1123,7 @@ async function waitFor(page, fn, timeout = 15000) {
     );
     check('详解给出用法提示与相关词', Boolean(explainCard.notes) && explainCard.related > 0, `${explainCard.notes} / ${explainCard.related} 个`);
     check('自动详解后不再重复显示「详细解释」按钮', !explainCard.hasButton);
-    await page.screenshot({ path: path.join(SHOT_DIR, '15-selection-phonetic.png') });
+    await shot(page, '15-selection-phonetic.png');
 
     // 整段话不自动详解（省额度），但要留一个手动入口，点了才查
     await selectNode('#p1');
@@ -916,7 +1153,7 @@ async function waitFor(page, fn, timeout = 15000) {
     );
     check('点「详细解释」后出详解', manualExplain);
     check('详解出来后按钮收起', !afterManual);
-    await page.screenshot({ path: path.join(SHOT_DIR, '19-selection-explain.png') });
+    await shot(page, '19-selection-explain.png');
 
     // 后台层面：同一个词第二次应命中缓存，不重复计费
     const explain1 = await askBackground(optionsPage, { type: 'EXPLAIN', text: 'threshold' });
@@ -1229,7 +1466,7 @@ async function waitFor(page, fn, timeout = 15000) {
     check('快速翻译自动给出词典详解', quickExplainOk && quickExplain.senses === 2, `${quickExplain.summary} / ${quickExplain.senses} 条`);
     check('快速翻译详解带例句译文', quickExplain.example.includes('例句'), quickExplain.example);
     check('详解出来后隐藏「详细解释」按钮', quickExplain.btnHidden);
-    await quickPage.screenshot({ path: path.join(SHOT_DIR, '18-popup-vocab.png') });
+    await shot(quickPage, '18-popup-vocab.png');
     check('弹窗页面无 JS 报错', quickErrors.length === 0, quickErrors.slice(0, 2).join(' | '));
     await quickPage.close();
 
@@ -1334,8 +1571,250 @@ async function waitFor(page, fn, timeout = 15000) {
     check('拒绝安装比当前更旧的版本', guards.older.includes('不比当前的'), guards.older);
     check('包内版本与 Release 标注不符时中止', guards.mismatch.includes('对不上'), guards.mismatch);
 
-    await optionsPage.screenshot({ path: path.join(SHOT_DIR, '20-options-update.png'), fullPage: true });
+    await shot(optionsPage, '20-options-update.png', { fullPage: true });
     await worker.evaluate(async () => chrome.storage.local.remove('updateApiBase'));
+
+    /* --- 13e. 云同步（WebDAV / Gist）与备份文件 --- */
+    const PASSPHRASE = 'correct horse battery staple';
+    const SYNC_KEY = 'sk-secret-to-sync-987654';
+    const DAV_BASE = `http://127.0.0.1:${PORT}/dav`;
+
+    const resetSync = async (file = 'mikelingo-sync.json') => {
+      await fetch(`http://127.0.0.1:${PORT}/dav/__reset`);
+      await askBackground(optionsPage, {
+        type: 'SYNC_SAVE_CONFIG',
+        config: {
+          enabled: true,
+          backend: 'webdav',
+          auto: false, // 自动同步会在断言中途插一脚，测试里只手动触发
+          includeSecrets: true,
+          webdav: { url: `${DAV_BASE}/${file}`, user: 'mikeuser' }
+        },
+        creds: { webdavPass: 'mikepass', passphrase: PASSPHRASE }
+      });
+    };
+
+    await resetSync();
+    // 造本地数据：两个生词 + 一个 API Key
+    await askBackground(optionsPage, { type: 'VOCAB_CLEAR' });
+    for (const w of ['syncalpha', 'syncbeta']) {
+      await askBackground(optionsPage, { type: 'VOCAB_ADD', entry: { word: w, lang: 'en', translation: `【译文】${w}` } });
+    }
+    await worker.evaluate(async (key) => {
+      await chrome.storage.local.set({ apiKeys: { deepseek: key }, apiKeysUpdatedAt: Date.now() });
+    }, SYNC_KEY);
+
+    const firstPush = await askBackground(optionsPage, { type: 'SYNC_NOW', direction: 'both' });
+    check('首次同步把本地数据推上远端', firstPush.ok === true, firstPush.result?.summary || firstPush.error);
+
+    const remoteAfterPush = await davGet(PORT, 'mikelingo-sync.json');
+    check(
+      '远端文件包含生词与设置',
+      remoteAfterPush?.vocab?.words?.length === 2 && Boolean(remoteAfterPush.settings?.providers),
+      `${remoteAfterPush?.vocab?.words?.length} 个词`
+    );
+    // 这条是整个方案的安全底线：云端只能拿到密文
+    const remoteText = JSON.stringify(remoteAfterPush);
+    check(
+      'API Key 在云端是密文，搜不到明文',
+      !remoteText.includes(SYNC_KEY) && Boolean(remoteAfterPush.secrets?.data),
+      `secrets.alg=${remoteAfterPush.secrets?.alg}`
+    );
+    check('远端记录了写入设备', typeof remoteAfterPush.device === 'string' && remoteAfterPush.device.length > 0, remoteAfterPush.device);
+
+    /* 模拟另一台机器：直接往远端写一份含新词、新接口、加密密钥的文件 */
+    const otherKey = 'sk-from-the-other-machine-42';
+    const otherBackup = {
+      format: 'mikelingo-backup',
+      version: 2,
+      exportedAt: Date.now(),
+      device: 'Edge / Windows',
+      settings: {
+        ...remoteAfterPush.settings,
+        providers: [
+          ...remoteAfterPush.settings.providers,
+          { id: 'otherbox', name: '另一台机器加的接口', baseUrl: 'https://api.example.com', model: 'demo-model', temperature: 1, timeout: 60000 }
+        ]
+      },
+      settingsUpdatedAt: Date.now() + 60000, // 比本机新，设置该以它为准
+      vocab: { words: [...remoteAfterPush.vocab.words, { word: 'syncgamma', lang: 'en', translation: '【译文】syncgamma', createdAt: Date.now(), updatedAt: Date.now() }], deleted: [] },
+      secrets: await encryptLikeExtension({ apiKeys: { deepseek: SYNC_KEY, otherbox: otherKey } }, PASSPHRASE),
+      secretsUpdatedAt: Date.now() + 60000
+    };
+    await davPut(PORT, 'mikelingo-sync.json', otherBackup);
+
+    const pulled = await askBackground(optionsPage, { type: 'SYNC_NOW', direction: 'both' });
+    check('从远端合并回新增的生词', pulled.result?.vocab?.added === 1, JSON.stringify(pulled.result?.vocab));
+    check('从远端合并回新增的接口配置', pulled.result?.settingsChanged === true, pulled.result?.summary);
+    check('自动带回另一台机器的 API Key', pulled.result?.keysAdded === 1, `keysAdded=${pulled.result?.keysAdded}`);
+
+    const afterMerge = await worker.evaluate(async () => {
+      const s = (await chrome.storage.sync.get('settings')).settings || {};
+      const keys = (await chrome.storage.local.get('apiKeys')).apiKeys || {};
+      return { providerIds: (s.providers || []).map((p) => p.id), keyIds: Object.keys(keys), otherKey: keys.otherbox || '' };
+    });
+    check('合并后两台机器的接口都在', afterMerge.providerIds.includes('otherbox') && afterMerge.providerIds.includes('deepseek'), afterMerge.providerIds.join(','));
+    check('解密出来的密钥内容正确', afterMerge.otherKey === otherKey, afterMerge.otherKey.slice(0, 12));
+
+    const vocabAfterMerge = await askBackground(optionsPage, { type: 'VOCAB_LIST', query: { limit: 100 } });
+    check('三个生词都在本机', vocabAfterMerge.total === 3, `共 ${vocabAfterMerge.total} 条`);
+
+    /* 删除要能传播出去，否则在这台删掉的词会被另一台还回来 */
+    await askBackground(optionsPage, { type: 'VOCAB_REMOVE', key: 'en|syncgamma' });
+    await askBackground(optionsPage, { type: 'SYNC_NOW', direction: 'both' });
+    const remoteAfterDelete = await davGet(PORT, 'mikelingo-sync.json');
+    check(
+      '删除生成墓碑并写上远端',
+      (remoteAfterDelete.vocab.deleted || []).some((d) => d.key === 'en|syncgamma') &&
+        !remoteAfterDelete.vocab.words.some((w) => w.word === 'syncgamma'),
+      `远端剩 ${remoteAfterDelete.vocab.words.length} 个词`
+    );
+
+    // 对面拿着旧数据（还带着这个词）再同步一次，不该把它复活
+    await davPut(PORT, 'mikelingo-sync.json', {
+      ...remoteAfterDelete,
+      vocab: { words: [...remoteAfterDelete.vocab.words, otherBackup.vocab.words.find((w) => w.word === 'syncgamma')], deleted: remoteAfterDelete.vocab.deleted }
+    });
+    await askBackground(optionsPage, { type: 'SYNC_NOW', direction: 'both' });
+    const afterResurrect = await askBackground(optionsPage, { type: 'VOCAB_LIST', query: { limit: 100 } });
+    check('已删除的词不会被旧数据复活', afterResurrect.total === 2, `共 ${afterResurrect.total} 条`);
+
+    /* 乐观锁：远端在写回前被改过，重试一次仍要成功 */
+    await fetch(`http://127.0.0.1:${PORT}/dav/__arm-conflict?path=${encodeURIComponent('/dav/conflict-once.json')}`);
+    await resetSync('conflict-once.json');
+    await fetch(`http://127.0.0.1:${PORT}/dav/__arm-conflict?path=${encodeURIComponent('/dav/conflict-once.json')}`);
+    const conflictRun = await askBackground(optionsPage, { type: 'SYNC_NOW', direction: 'both' });
+    check('远端被并发改动时自动重试并写成功', conflictRun.ok === true, conflictRun.result?.summary || conflictRun.error);
+
+    /* 口令不对：生词本照常同步，密钥这块如实报错 */
+    await resetSync();
+    await askBackground(optionsPage, { type: 'SYNC_NOW', direction: 'both' });
+    await askBackground(optionsPage, { type: 'SYNC_SAVE_CONFIG', config: {}, creds: { passphrase: 'wrong-passphrase' } });
+    const wrongPass = await askBackground(optionsPage, { type: 'SYNC_NOW', direction: 'pull' });
+    check(
+      '主口令不对时明确说是口令问题，其余照常同步',
+      wrongPass.ok === true && /主口令不对/.test(wrongPass.result?.secretsError || ''),
+      wrongPass.result?.secretsError
+    );
+    await askBackground(optionsPage, { type: 'SYNC_SAVE_CONFIG', config: {}, creds: { passphrase: PASSPHRASE } });
+
+    /* 配置不全时提前说清楚缺什么，而不是等服务端回一个 401 */
+    await askBackground(optionsPage, { type: 'SYNC_SAVE_CONFIG', config: { includeSecrets: true }, creds: { passphrase: '' } });
+    const noPass = await askBackground(optionsPage, { type: 'SYNC_NOW', direction: 'both' });
+    check('勾了同步密钥却没设主口令时中止并说明', noPass.ok === false && /主口令/.test(noPass.error || ''), noPass.error);
+    await askBackground(optionsPage, { type: 'SYNC_SAVE_CONFIG', config: {}, creds: { passphrase: PASSPHRASE } });
+
+    const badUrl = await askBackground(optionsPage, {
+      type: 'SYNC_SAVE_CONFIG',
+      config: { webdav: { url: 'dav.example.com/x' } },
+      creds: {}
+    });
+    const badUrlRun = await askBackground(optionsPage, { type: 'SYNC_NOW', direction: 'both' });
+    check('WebDAV 地址格式不对时给出可操作的提示', badUrlRun.ok === false && /http/.test(badUrlRun.error || ''), badUrlRun.error);
+    check('保存配置时密码只回显"已设置"', badUrl.config?.hasWebdavPass === true && badUrl.config?.webdavPass === undefined, JSON.stringify(Object.keys(badUrl.config || {})));
+
+    const wrongPassword = await askBackground(optionsPage, {
+      type: 'SYNC_SAVE_CONFIG',
+      config: { webdav: { url: `${DAV_BASE}/mikelingo-sync.json` } },
+      creds: { webdavPass: 'not-the-password' }
+    });
+    const authFail = await askBackground(optionsPage, { type: 'SYNC_NOW', direction: 'both' });
+    check('WebDAV 密码错时报 401 并指明是认证问题', authFail.ok === false && /401/.test(authFail.error || ''), authFail.error);
+    check('凭据保存后不回显原文', wrongPassword.config?.hasWebdavPass === true, '');
+    await askBackground(optionsPage, { type: 'SYNC_SAVE_CONFIG', config: {}, creds: { webdavPass: 'mikepass' } });
+
+    /* 测试连接：远端已有内容时要报出有多少词、谁写的 */
+    const testInfo = await askBackground(optionsPage, { type: 'SYNC_TEST' });
+    check('测试连接报出远端内容概况', testInfo.ok === true && /个生词/.test(testInfo.info?.message || ''), testInfo.info?.message);
+
+    /* 换 GitHub Gist 后端：Gist ID 留空时自动创建并存下来 */
+    await worker.evaluate(async (base) => chrome.storage.local.set({ syncApiBase: base }), `http://127.0.0.1:${PORT}`);
+    await askBackground(optionsPage, {
+      type: 'SYNC_SAVE_CONFIG',
+      config: { backend: 'gist', gist: { id: '' } },
+      creds: { gistToken: 'ghp_mocktoken123456' }
+    });
+    const gistRun = await askBackground(optionsPage, { type: 'SYNC_NOW', direction: 'both' });
+    const gistCfg = await askBackground(optionsPage, { type: 'SYNC_GET_CONFIG' });
+    check('Gist 后端同步成功', gistRun.ok === true, gistRun.result?.summary || gistRun.error);
+    check('首次同步自动创建 Gist 并记下 id', /^mockgist/.test(gistCfg.config?.gist?.id || ''), gistCfg.config?.gist?.id);
+
+    const badToken = await askBackground(optionsPage, { type: 'SYNC_SAVE_CONFIG', config: {}, creds: { gistToken: 'not-a-token' } });
+    const gistAuth = await askBackground(optionsPage, { type: 'SYNC_NOW', direction: 'both' });
+    check('Gist Token 无效时说明是 Token 问题', gistAuth.ok === false && /Token/.test(gistAuth.error || ''), gistAuth.error);
+    check('Gist Token 同样只回显"已设置"', badToken.config?.hasGistToken === true, '');
+
+    await worker.evaluate(async () => chrome.storage.local.remove('syncApiBase'));
+    await askBackground(optionsPage, {
+      type: 'SYNC_SAVE_CONFIG',
+      config: { backend: 'webdav', enabled: false },
+      creds: { gistToken: '' }
+    });
+
+    /* 备份文件：导出 → 清空 → 导入还原 */
+    const backupFile = await askBackground(optionsPage, { type: 'BACKUP_EXPORT', includeSecrets: true, passphrase: PASSPHRASE });
+    check(
+      '导出备份包含生词、设置与加密后的密钥',
+      backupFile.ok === true && backupFile.data.vocab.words.length === 2 && Boolean(backupFile.data.secrets?.data) && !JSON.stringify(backupFile.data).includes(SYNC_KEY),
+      `${backupFile.data?.vocab?.words?.length} 个词`
+    );
+    await askBackground(optionsPage, { type: 'VOCAB_CLEAR' });
+    await worker.evaluate(async () => chrome.storage.local.set({ apiKeys: {} }));
+    const backupRestore = await askBackground(optionsPage, { type: 'BACKUP_IMPORT', payload: backupFile.data, passphrase: PASSPHRASE });
+    const restoredKeys = await worker.evaluate(async () => (await chrome.storage.local.get('apiKeys')).apiKeys || {});
+    check('导入备份还原生词', backupRestore.ok === true && backupRestore.result.vocab.added === 2, JSON.stringify(backupRestore.result?.vocab));
+    check('导入备份还原 API Key', restoredKeys.deepseek === SYNC_KEY, String(restoredKeys.deepseek).slice(0, 10));
+
+    const wrongImport = await askBackground(optionsPage, { type: 'BACKUP_IMPORT', payload: backupFile.data, passphrase: 'nope' });
+    check('导入时口令不对只影响密钥，并说明原因', wrongImport.ok === true && /主口令不对/.test(wrongImport.result?.secretsError || ''), wrongImport.result?.secretsError);
+
+    const notOurs = await askBackground(optionsPage, { type: 'BACKUP_IMPORT', payload: { format: 'someone-else', words: [] } });
+    check('不是 MikeLingo 的备份文件会被拒绝', notOurs.ok === false && /不是 MikeLingo/.test(notOurs.error || ''), notOurs.error);
+
+    // 老版本只有生词本的导出（{version:1, words:[…]}）也要能导进来
+    const legacyImport = await askBackground(optionsPage, {
+      type: 'BACKUP_IMPORT',
+      payload: { version: 1, backupFileAt: Date.now(), count: 1, words: [{ word: 'legacyword', lang: 'en', translation: '老格式' }] }
+    });
+    check('兼容旧版只含生词本的导出文件', legacyImport.ok === true && legacyImport.result.vocab.added === 1, JSON.stringify(legacyImport.result?.vocab));
+
+    /* 设置页上的同步卡片 */
+    await optionsPage.reload({ waitUntil: 'networkidle2' });
+    await sleep(800);
+    const syncUi = await optionsPage.evaluate(() => {
+      const el = (id) => document.getElementById(id);
+      return {
+        hasCard: Boolean(el('syncEnabled')),
+        bodyHidden: el('syncBody').hidden,
+        backend: el('syncBackend').value,
+        url: el('syncWebdavUrl').value,
+        passPlaceholder: el('syncWebdavPass').type,
+        passState: el('syncWebdavPassState').textContent.trim(),
+        stateText: el('syncStateDetail').textContent.trim()
+      };
+    });
+    check('设置页有同步卡片，未启用时折叠', syncUi.hasCard && syncUi.bodyHidden === true, `backend=${syncUi.backend}`);
+    check('回显 WebDAV 地址但不回显密码', syncUi.url.includes('/dav/') && syncUi.passPlaceholder === 'password', syncUi.url);
+    check('已存的密码显示为"已设置"', syncUi.passState.includes('已设置'), syncUi.passState);
+    check('显示上次同步时间', syncUi.stateText.includes('上次同步'), syncUi.stateText);
+
+    await optionsPage.evaluate(() => {
+      document.getElementById('syncEnabled').checked = true;
+      document.getElementById('syncEnabled').dispatchEvent(new Event('change'));
+    });
+    await sleep(500);
+    const expanded = await optionsPage.evaluate(() => ({
+      bodyHidden: document.getElementById('syncBody').hidden,
+      gistHidden: document.getElementById('syncGist').hidden
+    }));
+    check('启用后展开配置区，且只显示当前后端的字段', expanded.bodyHidden === false && expanded.gistHidden === true, JSON.stringify(expanded));
+    // 设置页整页已经很长，整页截图在忙的机器上会超时；滚到同步卡片拍一张视口截图，又快又是要看的那块
+    await optionsPage.evaluate(() => document.getElementById('syncEnabled').closest('section').scrollIntoView());
+    await sleep(300);
+    await shot(optionsPage, '21-options-sync.png');
+
+    await askBackground(optionsPage, { type: 'SYNC_SAVE_CONFIG', config: { enabled: false }, creds: {} });
+    await askBackground(optionsPage, { type: 'VOCAB_CLEAR' });
 
     /* --- 14. 生词本页面与复习 --- */
     // 造两条数据：一条新词、一条已复习过的
@@ -1387,7 +1866,7 @@ async function waitFor(page, fn, timeout = 15000) {
     check('词表显示音标与原句', listInfo.firstPhonetic.includes('ipa') && listInfo.hasContext, listInfo.firstPhonetic);
     check('词表里的详解默认折叠', listInfo.explainCollapsed);
     check('统计里两条都待复习', listInfo.due === '2');
-    await vocabPage.screenshot({ path: path.join(SHOT_DIR, '16-vocab-list.png'), fullPage: true });
+    await shot(vocabPage, '16-vocab-list.png', { fullPage: true });
 
     // 搜索
     await vocabPage.type('#searchInput', 'threshold');
@@ -1436,7 +1915,7 @@ async function waitFor(page, fn, timeout = 15000) {
         new Set([revealed.again, revealed.hard, revealed.good, revealed.easy]).size === 4,
       `忘记 ${revealed.again} / 模糊 ${revealed.hard} / 记得 ${revealed.good} / 简单 ${revealed.easy}`
     );
-    await vocabPage.screenshot({ path: path.join(SHOT_DIR, '17-vocab-review.png') });
+    await shot(vocabPage, '17-vocab-review.png');
 
     const reviewedWord = reviewStart.word;
     await vocabPage.evaluate(() => document.querySelector('.grade-good').click());

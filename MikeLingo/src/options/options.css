@@ -146,6 +146,12 @@ textarea {
   line-height: 1.6;
 }
 
+/* 模型：候选下拉 +「自定义…」时才露出的手填框，两个都在时留点间距 */
+.p-models:not([hidden]) + .p-model,
+#explainModels:not([hidden]) + #explainModel {
+  margin-top: 8px;
+}
+
 input:focus,
 select:focus,
 textarea:focus {
@@ -516,6 +522,75 @@ button:focus-visible {
 .provider-body .field {
   margin-top: 16px;
   margin-bottom: 0;
+}
+
+/* 「更多设置」折叠区：名称 / 地址 / 温度 / 超时按预设都已填好，绝大多数人不用打开 */
+.adv {
+  margin-top: 18px;
+  border-top: 1px dashed var(--border);
+}
+
+.adv > summary {
+  /* 去掉浏览器默认的三角，自己画一个，才能跟着展开状态转 */
+  list-style: none;
+  cursor: pointer;
+  padding: 12px 2px 2px;
+  font-size: 13px;
+  color: var(--text-sub);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  border-radius: 6px;
+  transition: color 160ms ease;
+}
+
+.adv > summary::-webkit-details-marker {
+  display: none;
+}
+
+.adv > summary::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-right: 1.6px solid currentColor;
+  border-bottom: 1.6px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 160ms ease;
+}
+
+.adv[open] > summary::before {
+  transform: rotate(45deg);
+}
+
+.adv > summary:hover {
+  color: var(--text);
+}
+
+.adv > summary:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .adv > summary,
+  .adv > summary::before {
+    transition: none;
+  }
+}
+
+.adv-body {
+  padding-bottom: 4px;
+}
+
+/* 保存按钮贴在 API Key 输入框后面，别被 flex 压扁成一条 */
+.input-row .p-save {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.p-saveresult:empty {
+  display: none;
 }
 
 .mt-note {

@@ -80,11 +80,159 @@ function dictEntry(word, origin) {
   ];
 }
 
+/* --------------------------- 假 WebDAV / 假 Gist --------------------------- */
+
+/** 假 WebDAV：内存里的一张 路径 → { text, etag } 表，支持 If-Match / If-None-Match 乐观锁 */
+const davFiles = new Map();
+const DAV_USER = 'mikeuser';
+const DAV_PASS = 'mikepass';
+let davRevSeq = 0;
+/** 路径里带 conflict-once 的文件，第一次 PUT 固定回 412，用来验证冲突重试真的会重来一遍 */
+const davConflictArmed = new Set();
+
+/** 假 Gist：id → { files, updated_at }，Token 必须像个 GitHub token */
+const gists = new Map();
+let gistSeq = 0;
+
+function readBody(req) {
+  return new Promise((resolve) => {
+    let data = '';
+    req.on('data', (c) => (data += c));
+    req.on('end', () => resolve(data));
+  });
+}
+
+function sendJson(res, code, obj, headers = {}) {
+  const text = JSON.stringify(obj);
+  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', ...headers });
+  res.end(text);
+}
+
+async function handleDav(req, res, url) {
+  const auth = req.headers.authorization || '';
+  const expect = 'Basic ' + Buffer.from(`${DAV_USER}:${DAV_PASS}`).toString('base64');
+  if (auth !== expect) {
+    res.writeHead(401, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end('Unauthorized');
+  }
+
+  const key = url.pathname;
+  const existing = davFiles.get(key);
+
+  if (req.method === 'GET' || req.method === 'HEAD') {
+    if (!existing) {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      return res.end('Not Found');
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', ETag: existing.etag });
+    return res.end(req.method === 'HEAD' ? undefined : existing.text);
+  }
+
+  if (req.method === 'PUT') {
+    const body = await readBody(req);
+    if (key.includes('conflict-once') && davConflictArmed.has(key)) {
+      davConflictArmed.delete(key); // 只挡一次，重试就该成功
+      res.writeHead(412, { 'Content-Type': 'text/plain' });
+      return res.end('Precondition Failed');
+    }
+    const ifMatch = req.headers['if-match'];
+    const ifNone = req.headers['if-none-match'];
+    if (ifMatch && (!existing || existing.etag !== ifMatch)) {
+      res.writeHead(412, { 'Content-Type': 'text/plain' });
+      return res.end('Precondition Failed');
+    }
+    if (ifNone === '*' && existing) {
+      res.writeHead(412, { 'Content-Type': 'text/plain' });
+      return res.end('Precondition Failed');
+    }
+    const etag = `"w${++davRevSeq}"`;
+    davFiles.set(key, { text: body, etag });
+    res.writeHead(existing ? 204 : 201, { ETag: etag });
+    return res.end();
+  }
+
+  res.writeHead(405, { 'Content-Type': 'text/plain' });
+  return res.end('Method Not Allowed');
+}
+
+async function handleGist(req, res, url) {
+  const auth = req.headers.authorization || '';
+  if (!/^Bearer (ghp_|github_pat_)/.test(auth)) {
+    return sendJson(res, 401, { message: 'Bad credentials' });
+  }
+
+  const idMatch = url.pathname.match(/^\/gists\/([^/]+)$/);
+
+  if (req.method === 'GET' && idMatch) {
+    const gist = gists.get(idMatch[1]);
+    if (!gist) return sendJson(res, 404, { message: 'Not Found' });
+    return sendJson(res, 200, { id: idMatch[1], files: gist.files, updated_at: gist.updated_at });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/gists') {
+    const payload = JSON.parse((await readBody(req)) || '{}');
+    const id = `mockgist${++gistSeq}`;
+    gists.set(id, { files: payload.files || {}, updated_at: new Date().toISOString() });
+    return sendJson(res, 201, { id, files: payload.files, updated_at: gists.get(id).updated_at });
+  }
+
+  if (req.method === 'PATCH' && idMatch) {
+    const gist = gists.get(idMatch[1]);
+    if (!gist) return sendJson(res, 404, { message: 'Not Found' });
+    const payload = JSON.parse((await readBody(req)) || '{}');
+    gist.files = { ...gist.files, ...(payload.files || {}) };
+    gist.updated_at = new Date().toISOString();
+    return sendJson(res, 200, { id: idMatch[1], files: gist.files, updated_at: gist.updated_at });
+  }
+
+  return sendJson(res, 405, { message: 'Method Not Allowed' });
+}
+
+/**
+ * 限流模拟：把并发和速率卡死，验证扩展的请求闸门能不能自己退避到成功。
+ * maxConcurrent：同时超过这么多个在飞的 /chat/completions 就回 429（阿里云百炼那种）
+ * minGapMs：两次请求间隔小于这个值也回 429
+ */
+const rateLimit = { maxConcurrent: 0, minGapMs: 0, active: 0, lastAt: 0, rejected: 0, served: 0 };
+
 const server = http.createServer((req, res) => {
   // MOCK_VERBOSE=1 时打印每个请求，排查"请求到底有没有到服务端"用
   if (process.env.MOCK_VERBOSE) {
     res.on('finish', () => console.log(`[mock] ${req.method} ${req.url} -> ${res.statusCode}`));
   }
+
+  // 同步相关的路由要在最前面拦掉：下面的兜底会把任何非 GET 当成 /chat/completions
+  const reqUrl = new URL(req.url, `http://127.0.0.1:${PORT}`);
+  if (reqUrl.pathname.startsWith('/dav/')) {
+    // 测试用的复位入口：每个用例开始前把远端清空，用例之间不互相污染
+    if (reqUrl.pathname === '/dav/__reset') {
+      davFiles.clear();
+      davConflictArmed.clear();
+      gists.clear();
+      return sendJson(res, 200, { ok: true });
+    }
+    if (reqUrl.pathname === '/dav/__arm-conflict') {
+      davConflictArmed.add(reqUrl.searchParams.get('path') || '');
+      return sendJson(res, 200, { ok: true });
+    }
+    return handleDav(req, res, reqUrl);
+  }
+  if (reqUrl.pathname === '/__ratelimit') {
+    rateLimit.maxConcurrent = Number(reqUrl.searchParams.get('maxConcurrent') || 0);
+    rateLimit.minGapMs = Number(reqUrl.searchParams.get('minGapMs') || 0);
+    rateLimit.active = 0;
+    rateLimit.lastAt = 0;
+    rateLimit.rejected = 0;
+    rateLimit.served = 0;
+    return sendJson(res, 200, { ok: true, ...rateLimit });
+  }
+  if (reqUrl.pathname === '/__ratelimit/stats') {
+    return sendJson(res, 200, { rejected: rateLimit.rejected, served: rateLimit.served });
+  }
+  if (reqUrl.pathname === '/gists' || reqUrl.pathname.startsWith('/gists/')) {
+    return handleGist(req, res, reqUrl);
+  }
+
   if (req.method === 'GET') {
     const url = new URL(req.url, `http://127.0.0.1:${PORT}`);
     const origin = `http://127.0.0.1:${PORT}`;
@@ -223,6 +371,33 @@ const server = http.createServer((req, res) => {
     } catch {
       res.writeHead(400, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ error: { message: 'invalid json' } }));
+    }
+
+    // 限流模拟要放在业务分支之前：真实服务商也是先按速率拒，再看你请求里写了什么
+    if (rateLimit.maxConcurrent || rateLimit.minGapMs) {
+      const now = Date.now();
+      const tooFast = rateLimit.minGapMs && rateLimit.lastAt && now - rateLimit.lastAt < rateLimit.minGapMs;
+      const tooMany = rateLimit.maxConcurrent && rateLimit.active >= rateLimit.maxConcurrent;
+      if (tooFast || tooMany) {
+        rateLimit.rejected++;
+        res.writeHead(429, { 'Content-Type': 'application/json', 'Retry-After': '1' });
+        return res.end(
+          JSON.stringify({
+            error: {
+              code: 'Throttling.RateQuota',
+              message:
+                'You have exceeded your current request limit. For details, see: ' +
+                'https://help.aliyun.com/zh/model-studio/error-code#rate-limit'
+            }
+          })
+        );
+      }
+      rateLimit.lastAt = now;
+      rateLimit.served++;
+      rateLimit.active++;
+      res.on('finish', () => {
+        rateLimit.active = Math.max(0, rateLimit.active - 1);
+      });
     }
 
     const userContent = payload.messages?.find((m) => m.role === 'user')?.content || '';

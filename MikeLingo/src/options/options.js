@@ -10,13 +10,14 @@ const CLOSE_ICON =
 /**
  * 各服务商的常用模型。mt: true 表示翻译专用模型——能翻译，但做不了词典详解，
  * 所以「详解使用的模型」的候选里会被滤掉。
- * 通义两个预设共用一份：地址和密钥本来就是同一套，qwen-plus 和 qwen-mt-turbo 都能填。
+ * 通义两个预设共用一份：地址和密钥本来就是同一套，qwen-plus 和 qwen-mt-flash 都能填。
  */
 const DASHSCOPE_MODELS = [
   { value: 'qwen-plus', note: '推荐，通用' },
   { value: 'qwen-turbo', note: '更快更便宜' },
   { value: 'qwen-max', note: '最强，较贵' },
-  { value: 'qwen-mt-turbo', note: '翻译专用，便宜', mt: true },
+  { value: 'qwen-mt-flash', note: '翻译专用，便宜', mt: true },
+  { value: 'qwen-mt-lite', note: '翻译专用，最便宜', mt: true },
   { value: 'qwen-mt-plus', note: '翻译专用，质量更好', mt: true }
 ];
 
@@ -70,13 +71,15 @@ const PRESETS = [
     name: '阿里通义千问',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     model: 'qwen-plus',
-    models: DASHSCOPE_MODELS
+    models: DASHSCOPE_MODELS,
+    // 百炼专属部署的接入点是 llm-<实例>.<地域>.maas.aliyuncs.com，路径和模型目录与公共地址一致
+    altHost: /\.maas\.aliyuncs\.com$/
   },
   {
     key: 'qwen-mt',
     name: '通义千问 MT（翻译专用）',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    model: 'qwen-mt-turbo',
+    model: 'qwen-mt-flash',
     models: DASHSCOPE_MODELS
   },
   {
@@ -124,6 +127,7 @@ function presetForBaseUrl(baseUrl) {
   }
   if (!host) return null;
   return PRESETS.find((preset) => {
+    if (preset.altHost?.test(host)) return true;
     try {
       return new URL(preset.baseUrl).host.toLowerCase() === host;
     } catch {
@@ -132,21 +136,60 @@ function presetForBaseUrl(baseUrl) {
   }) || null;
 }
 
+const CUSTOM_MODEL = '__custom__'; // 下拉里「自定义…」那一项的值，不会被当成模型名存下去
+
 /**
- * 把候选模型填进某个 datalist。选中的是 A 服务商就不该冒出 B 服务商的模型，
- * 否则填了也是 404。地址认不出来（自定义接口）就留空，让用户自己填。
+ * 把候选模型填进一个真下拉，并让它和手填输入框保持一致。选中的是 A 服务商就不该冒出
+ * B 服务商的模型，否则填了也是 404。地址认不出来（自定义接口）就不给候选，直接露出输入框。
+ *
+ * 这里刻意不用 `input + datalist`：datalist 的候选会被输入框里已有的文字过滤，
+ * 框里存着一个不在候选里的旧模型名时，候选一条都不剩，用户看到的就是「下拉点不开」。
+ *
+ * @param select     候选下拉
+ * @param input      手填输入框（选「自定义…」时才可见）
+ * @param baseUrl    这个接口的 API 地址，决定候选是哪家的
+ * @param excludeMt  是否排除翻译专用模型（详解功能用不了这类模型）
+ * @param emptyLabel 传了就在最前面加一项「空值」（详解的模型可以留空 = 跟随接口）
  */
-function fillModelOptions(datalist, baseUrl, { excludeMt = false } = {}) {
-  if (!datalist) return;
-  const preset = presetForBaseUrl(baseUrl);
-  const models = (preset?.models || []).filter((m) => !(excludeMt && m.mt));
-  datalist.innerHTML = '';
-  for (const model of models) {
+function syncModelPicker(select, input, baseUrl, { excludeMt = false, emptyLabel = '' } = {}) {
+  if (!select || !input) return;
+  const models = (presetForBaseUrl(baseUrl)?.models || []).filter((m) => !(excludeMt && m.mt));
+  const values = models.map((m) => m.value);
+
+  select.innerHTML = '';
+  const addOption = (value, label) => {
     const option = document.createElement('option');
-    option.value = model.value;
-    if (model.note) option.textContent = `${model.value}（${model.note}）`;
-    datalist.appendChild(option);
-  }
+    option.value = value;
+    option.textContent = label;
+    select.appendChild(option);
+  };
+  if (emptyLabel) addOption('', emptyLabel);
+  for (const model of models) addOption(model.value, model.note ? `${model.value}（${model.note}）` : model.value);
+  addOption(CUSTOM_MODEL, '自定义…');
+
+  // 认不出服务商时没有候选可选，下拉只剩「自定义…」，留着纯属干扰
+  const hasChoices = values.length > 0;
+  select.hidden = !hasChoices;
+
+  const current = input.value.trim();
+  const known = current === '' ? Boolean(emptyLabel) : values.includes(current);
+  select.value = known ? current : CUSTOM_MODEL;
+  // 候选里选中的就不必再露输入框；自定义（含旧模型名、留空而又不允许留空）时必须能看到并改
+  input.hidden = hasChoices && known;
+}
+
+/** 下拉选了某项 → 写回输入框。选「自定义…」则把输入框露出来让用户自己填 */
+function bindModelPicker(select, input) {
+  select.addEventListener('change', () => {
+    if (select.value === CUSTOM_MODEL) {
+      input.hidden = false;
+      input.focus();
+      return;
+    }
+    input.hidden = true;
+    input.value = select.value;
+    input.dispatchEvent(new Event('input', { bubbles: true })); // 复用输入框原有的保存/校验逻辑
+  });
 }
 
 let settings = null;
@@ -162,8 +205,10 @@ let sites = [];
 function fillForm() {
   $('targetLang').value = settings.targetLang;
   $('concurrency').value = settings.concurrency;
+  $('rpm').value = settings.rpm;
   $('batchSize').value = settings.batchSize;
   $('batchChars').value = settings.batchChars;
+  $('maxRetries').value = settings.maxRetries;
   $('onlyTranslateForeign').checked = settings.onlyTranslateForeign;
   $('cacheEnabled').checked = settings.cacheEnabled;
   $('customPrompt').value = settings.customPrompt;
@@ -257,13 +302,14 @@ function renderProviders() {
     const baseUrlInput = bindField(li, provider, 'baseUrl');
     bindField(li, provider, 'temperature');
 
-    // 候选模型跟着这一行的 API 地址走：模板里的 datalist 没有 id，这里补上再接到输入框
+    // 候选模型跟着这一行的 API 地址走
     const modelOptions = li.querySelector('.p-models');
-    modelOptions.id = `models-${provider.id}`;
-    modelInput.setAttribute('list', modelOptions.id);
-    const syncModelOptions = () => fillModelOptions(modelOptions, baseUrlInput.value);
+    const syncModelOptions = () => syncModelPicker(modelOptions, modelInput, baseUrlInput.value);
+    bindModelPicker(modelOptions, modelInput);
     baseUrlInput.addEventListener('input', syncModelOptions);
     baseUrlInput.addEventListener('input', syncExplainProviderWarn); // 详解那边的候选也跟着换
+    // 手填改成了候选里的名字（或反过来）时，下拉的选中项要跟上
+    modelInput.addEventListener('change', syncModelOptions);
     syncModelOptions();
     bindField(li, provider, 'timeout', {
       toInput: (ms) => Math.round(ms / 1000),
@@ -326,6 +372,26 @@ function renderProviders() {
       keyInput.type = reveal ? 'text' : 'password';
       showKey.textContent = reveal ? '隐藏' : '显示';
       showKey.setAttribute('aria-pressed', String(reveal));
+    });
+
+    /**
+     * 贴在 API Key 后面的「保存」：填完密钥最想做的就是存下来，
+     * 不该再让人滚到页面底部去找按钮。走的是和底部按钮同一个 saveAll()。
+     */
+    const saveBtnInline = li.querySelector('.p-save');
+    saveBtnInline.addEventListener('click', async () => {
+      saveBtnInline.disabled = true;
+      saveBtnInline.textContent = '保存中…';
+      const res = await saveAll();
+      saveBtnInline.disabled = false;
+      saveBtnInline.textContent = '保存';
+      // saveAll 成功会重渲染整个列表，手里这个 li 已经被换掉了；
+      // 按 li.dataset.id 找回新渲染出来的那一行，否则提示写在游离节点上，用户什么也看不到
+      const fresh = document
+        .querySelector(`.provider[data-id="${CSS.escape(provider.id)}"] .p-saveresult`);
+      if (!fresh) return;
+      fresh.textContent = res.ok ? '已保存，立即生效' : res.error;
+      fresh.className = `test-result p-saveresult ${res.ok ? 'ok' : 'fail'}`;
     });
 
     li.querySelector('.p-clearkey').addEventListener('click', async () => {
@@ -425,7 +491,10 @@ function syncExplainProviderWarn() {
   const { provider, model, overridden } = resolveExplainTarget();
 
   // 候选只给这个接口自家的通用模型：选了 DeepSeek 就不该看到 gpt-4o-mini
-  fillModelOptions($('explainModels'), provider?.baseUrl, { excludeMt: true });
+  syncModelPicker($('explainModels'), $('explainModel'), provider?.baseUrl, {
+    excludeMt: true,
+    emptyLabel: '跟随该接口的模型'
+  });
 
   if (hint) {
     hint.textContent = provider
@@ -459,7 +528,8 @@ function addProvider() {
   );
   expandedId = id;
   renderProviders();
-  $('providerList').lastElementChild?.querySelector('.p-name')?.focus();
+  // 名称／地址预设已填好且收在「更多设置」里，光标该落在唯一真正要填的 API Key 上
+  $('providerList').lastElementChild?.querySelector('.p-key')?.focus();
 }
 
 async function removeProvider(id) {
@@ -582,8 +652,10 @@ function collectForm() {
       activeProviderId,
       targetLang: $('targetLang').value.trim() || '简体中文',
       concurrency: Number($('concurrency').value),
+      rpm: Number($('rpm').value),
       batchSize: Number($('batchSize').value),
       batchChars: Number($('batchChars').value),
+      maxRetries: Number($('maxRetries').value),
       onlyTranslateForeign: $('onlyTranslateForeign').checked,
       cacheEnabled: $('cacheEnabled').checked,
       customPrompt: $('customPrompt').value.trim(),
@@ -724,12 +796,17 @@ $('testSpeak').addEventListener('click', async () => {
   }
 });
 
-$('saveBtn').addEventListener('click', async () => {
+/**
+ * 保存全部设置。底部的「保存设置」和每个接口里贴着 API Key 的那个「保存」按钮
+ * 走的是同一个函数——两个入口存的东西必须完全一样，否则用哪个按钮结果不同就是坑。
+ * 返回是否成功，好让调用方各自决定把结果显示在哪。
+ */
+async function saveAll() {
   const providersOk = validateAllProviders();
   const { valid, patch } = collectForm();
   if (!providersOk || !valid) {
     showSaveStatus('请修正标红的字段后再保存', true);
-    return;
+    return { ok: false, error: '请修正标红的字段后再保存' };
   }
   $('saveBtn').disabled = true;
   try {
@@ -742,20 +819,28 @@ $('saveBtn').addEventListener('click', async () => {
     await refreshKeyMasks();
     renderProviders();
     fillForm();
+    // 同步卡片有自己的按钮，但用户改完地址顺手点「保存设置」也该存下，不能悄悄丢
+    await saveSyncConfig().catch(() => {});
     showSaveStatus('设置已保存并立即生效');
     const tabs = await chrome.tabs.query({});
     for (const tab of tabs) {
       if (tab.id) chrome.tabs.sendMessage(tab.id, { type: 'SETTINGS_UPDATED' }).catch(() => {});
     }
+    return { ok: true };
   } catch (err) {
-    showSaveStatus(`保存失败：${err?.message || err}`, true);
+    const error = `保存失败：${err?.message || err}`;
+    showSaveStatus(error, true);
+    return { ok: false, error };
   } finally {
     $('saveBtn').disabled = false;
   }
-});
+}
+
+$('saveBtn').addEventListener('click', saveAll);
 
 $('explainProvider').addEventListener('change', syncExplainProviderWarn);
 $('explainModel').addEventListener('input', syncExplainProviderWarn);
+bindModelPicker($('explainModels'), $('explainModel'));
 
 /* -------------------------------- 检查更新 -------------------------------- */
 
@@ -852,6 +937,221 @@ $('checkUpdate').addEventListener('click', checkUpdate);
 $('installUpdate').addEventListener('click', () => installUpdate());
 $('pickDir').addEventListener('click', () => installUpdate({ forcePick: true }));
 
+/* -------------------------------- 同步与备份 ------------------------------- */
+
+/**
+ * 所有同步动作都发给后台执行，页面只管收集表单和显示结果。
+ * 原因有两个：service worker 拿得到 IndexedDB 里的生词本；
+ * 而且设置页关掉之后自动同步还得继续跑，逻辑放页面里就断了。
+ */
+async function syncSend(message) {
+  const res = await chrome.runtime.sendMessage(message).catch((err) => ({ ok: false, error: err?.message || String(err) }));
+  if (!res?.ok) throw new Error(res?.error || '后台没有响应');
+  return res;
+}
+
+function showSyncResult(message, kind) {
+  const el = $('syncResult');
+  el.textContent = message || '';
+  el.classList.toggle('ok', kind === 'ok');
+  el.classList.toggle('fail', kind === 'error');
+}
+
+function showBackupResult(message, kind) {
+  const el = $('backupResult');
+  el.textContent = message || '';
+  el.classList.toggle('ok', kind === 'ok');
+  el.classList.toggle('fail', kind === 'error');
+}
+
+/** 后端切换只改显示，不清空另一边的输入——用户来回比较时不该被清掉 */
+function renderSyncBackend() {
+  const backend = $('syncBackend').value;
+  $('syncWebdav').hidden = backend !== 'webdav';
+  $('syncGist').hidden = backend !== 'gist';
+  $('syncBackendHelp').textContent =
+    backend === 'gist'
+      ? '数据存成一个私密 Gist。只要 Token 有 gist 权限即可，不需要仓库。'
+      : '数据存成网盘里的一个 JSON 文件。坚果云在「账户信息 → 安全选项 → 添加应用」里生成应用密码。';
+}
+
+function renderSyncEnabled() {
+  const on = $('syncEnabled').checked;
+  $('syncBody').hidden = !on;
+}
+
+function describeSyncState(state) {
+  if (state.lastError) return `上次同步失败：${state.lastError}`;
+  if (!state.lastSyncAt) return '还没有同步过。';
+  return `上次同步：${new Date(state.lastSyncAt).toLocaleString()}${state.lastSummary ? `（${state.lastSummary}）` : ''}`;
+}
+
+function renderSyncState(state) {
+  $('syncStateDetail').textContent = describeSyncState(state);
+  $('syncState').classList.toggle('warn', Boolean(state.lastError));
+}
+
+/** 已存过的凭据只说"已设置"，不回显原文；留空保存 = 保持不变（和 API Key 一个规矩） */
+function renderCredState(id, has, base) {
+  $(id).textContent = has ? `已设置，留空保存表示不修改。${base}` : base;
+}
+
+async function loadSyncForm() {
+  const { config, state } = await syncSend({ type: 'SYNC_GET_CONFIG' });
+  $('syncEnabled').checked = config.enabled;
+  $('syncBackend').value = config.backend;
+  $('syncWebdavUrl').value = config.webdav.url;
+  $('syncWebdavUser').value = config.webdav.user;
+  $('syncGistId').value = config.gist.id;
+  $('syncIncludeSecrets').checked = config.includeSecrets;
+  $('syncAuto').checked = config.auto;
+  renderCredState('syncWebdavPassState', config.hasWebdavPass, '坚果云要用「应用密码」，不是登录密码。');
+  renderCredState('syncGistTokenState', config.hasGistToken, '细粒度 Token 勾 Gists: Read and write，经典 Token 勾 gist。');
+  renderCredState(
+    'syncPassphraseState',
+    config.hasPassphrase,
+    '只留在本机，不会上传。两台浏览器要填同一个口令才解得开对方的密钥。'
+  );
+  renderSyncBackend();
+  renderSyncEnabled();
+  renderSyncState(state);
+
+  // 凭据填齐了就把配置区收起来，平时只剩「立即同步」和状态；没配好则默认展开，
+  // 否则新用户打开卡片只看到一个按钮，根本不知道还要填东西
+  const configured =
+    config.backend === 'gist'
+      ? config.hasGistToken
+      : Boolean(config.webdav.url && config.webdav.user && config.hasWebdavPass);
+  $('syncAdv').open = !configured;
+}
+
+/** 表单 → 后台。密码类字段留空表示不修改，所以只在填了内容时才传 */
+async function saveSyncConfig() {
+  const creds = {};
+  if ($('syncWebdavPass').value) creds.webdavPass = $('syncWebdavPass').value;
+  if ($('syncGistToken').value) creds.gistToken = $('syncGistToken').value;
+  if ($('syncPassphrase').value) creds.passphrase = $('syncPassphrase').value;
+
+  await syncSend({
+    type: 'SYNC_SAVE_CONFIG',
+    config: {
+      enabled: $('syncEnabled').checked,
+      backend: $('syncBackend').value,
+      auto: $('syncAuto').checked,
+      includeSecrets: $('syncIncludeSecrets').checked,
+      webdav: { url: $('syncWebdavUrl').value, user: $('syncWebdavUser').value },
+      gist: { id: $('syncGistId').value }
+    },
+    creds
+  });
+  // 存完就把密码框清空并改成"已设置"，避免密文长期停留在 DOM 里
+  $('syncWebdavPass').value = '';
+  $('syncGistToken').value = '';
+  $('syncPassphrase').value = '';
+  await loadSyncForm();
+}
+
+const SYNC_BUTTONS = ['syncTest', 'syncNow', 'syncPull', 'syncPush'];
+
+async function runSyncAction(label, fn) {
+  SYNC_BUTTONS.forEach((id) => ($(id).disabled = true));
+  showSyncResult(`${label}中…`);
+  try {
+    await saveSyncConfig(); // 先落配置：用户改完地址直接点同步是最常见的操作顺序
+    const message = await fn();
+    showSyncResult(message, 'ok');
+  } catch (err) {
+    showSyncResult(err?.message || String(err), 'error');
+  } finally {
+    SYNC_BUTTONS.forEach((id) => ($(id).disabled = false));
+    const { state } = await syncSend({ type: 'SYNC_GET_CONFIG' }).catch(() => ({ state: {} }));
+    renderSyncState(state || {});
+  }
+}
+
+async function doSync(direction, label) {
+  const { result } = await syncSend({ type: 'SYNC_NOW', direction });
+  const extra = result.secretsError ? `。注意：${result.secretsError}` : '';
+  return `${label}完成：${result.summary}${extra}`;
+}
+
+$('syncEnabled').addEventListener('change', () => {
+  renderSyncEnabled();
+  saveSyncConfig().catch((err) => showSyncResult(err?.message || String(err), 'error'));
+});
+$('syncBackend').addEventListener('change', renderSyncBackend);
+$('syncTest').addEventListener('click', () =>
+  runSyncAction('测试', async () => (await syncSend({ type: 'SYNC_TEST' })).info.message)
+);
+$('syncNow').addEventListener('click', () => runSyncAction('同步', () => doSync('both', '同步')));
+$('syncPull').addEventListener('click', () => runSyncAction('下载', () => doSync('pull', '下载')));
+$('syncPush').addEventListener('click', () => runSyncAction('上传', () => doSync('push', '上传')));
+
+/* ------------------------------ 备份文件 ------------------------------ */
+
+function downloadFile(filename, content) {
+  const blob = new Blob([content], { type: 'application/json;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function fileStamp() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`;
+}
+
+$('backupExport').addEventListener('click', async () => {
+  showBackupResult('');
+  try {
+    await saveSyncConfig();
+    const includeSecrets = $('syncIncludeSecrets').checked;
+    const passphrase = $('syncPassphrase').value; // 刚输入还没落盘的口令也算数
+    const { data } = await syncSend({ type: 'BACKUP_EXPORT', includeSecrets, passphrase });
+    downloadFile(`mikelingo-backup-${fileStamp()}.json`, JSON.stringify(data, null, 2));
+    showBackupResult(
+      `已导出 ${data.vocab.words.length} 个生词、设置与接口配置${data.secrets ? '，API Key 已加密' : '（不含 API Key）'}`,
+      'ok'
+    );
+  } catch (err) {
+    showBackupResult(err?.message || String(err), 'error');
+  }
+});
+
+$('backupImport').addEventListener('click', () => $('backupFile').click());
+
+$('backupFile').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = ''; // 同一个文件连选两次也要能触发
+  if (!file) return;
+  showBackupResult('导入中…');
+  try {
+    const payload = JSON.parse(await file.text());
+    const { result } = await syncSend({ type: 'BACKUP_IMPORT', payload, passphrase: $('syncPassphrase').value });
+    const parts = [`新增 ${result.vocab.added} 个生词`, `合并 ${result.vocab.merged} 个`];
+    if (result.vocab.deleted) parts.push(`删除 ${result.vocab.deleted} 个`);
+    if (result.settingsChanged) parts.push('更新了设置');
+    if (result.keysAdded) parts.push(`带回 ${result.keysAdded} 个 API Key`);
+    showBackupResult(
+      `导入完成：${parts.join('，')}${result.secretsError ? `。注意：${result.secretsError}` : ''}`,
+      result.secretsError ? 'error' : 'ok'
+    );
+    // 设置可能被合并改过，重新载入表单，别让用户看着旧值
+    settings = await DST.loadSettings();
+    providers = settings.providers.map((p) => Object.assign({}, p));
+    activeProviderId = settings.activeProviderId;
+    await refreshKeyMasks();
+    renderProviders();
+    fillForm();
+  } catch (err) {
+    showBackupResult(err?.message || String(err), 'error');
+  }
+});
+
 /* --------------------------------- 初始化 -------------------------------- */
 
 async function refreshKeyMasks() {
@@ -872,4 +1172,5 @@ async function refreshKeyMasks() {
   refreshCacheInfo();
   refreshVoiceState();
   renderUpdateMeta();
+  loadSyncForm().catch((err) => showSyncResult(err?.message || String(err), 'error'));
 })();

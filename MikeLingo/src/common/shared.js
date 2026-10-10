@@ -25,6 +25,9 @@
     batchSize: 10,
     batchChars: 1800,
     concurrency: 3,
+    // 每分钟请求上限（RPM）。0 = 不限，由后台按 429 自适应放慢；
+    // 阿里云百炼等按 RPM 计费/限流的服务商可以按自己的额度填死，例如免费额度常见 60。
+    rpm: 0,
     maxRetries: 2,
     cacheEnabled: true,
     // 显示
@@ -44,7 +47,7 @@
     // 所以允许把详解单独指到一个通用对话模型的接口上。
     explainProviderId: '',
     // 详解用哪个模型。空 = 用该接口自己配的模型。
-    // 同一家服务商（同地址同密钥）想翻译用 qwen-mt-turbo、详解用 qwen-plus 时，
+    // 同一家服务商（同地址同密钥）想翻译用 qwen-mt-flash、详解用 qwen-plus 时，
     // 只填这一个字段就够了，不必再配一个接口。
     explainModel: '',
     // 音标与发音
@@ -62,6 +65,29 @@
   const SETTINGS_KEY = 'settings';
   const API_KEYS_KEY = 'apiKeys'; // { [providerId]: key }
   const LEGACY_API_KEY = 'apiKey'; // 1.1.0 及以前的单密钥
+  /**
+   * 各自最后一次改动的时间戳，云同步靠它判断"哪边更新"。
+   * 单独存在 local 而不是塞进 settings 里：settings 本身要参与同步，
+   * 把时间戳写进去会让每次同步都显得内容变了，来回打架。
+   */
+  const SETTINGS_STAMP_KEY = 'settingsUpdatedAt';
+  const API_KEYS_STAMP_KEY = 'apiKeysUpdatedAt';
+
+  async function stamp(key) {
+    try {
+      await chrome.storage.local.set({ [key]: Date.now() });
+    } catch {
+      /* 时间戳只影响同步的先后判断，写不进去不该拦住保存本身 */
+    }
+  }
+
+  async function readStamp(key) {
+    try {
+      return Number((await chrome.storage.local.get(key))[key]) || 0;
+    } catch {
+      return 0;
+    }
+  }
 
   function clampNumber(value, min, max, fallback) {
     const n = Number(value);
@@ -119,6 +145,7 @@
     s.batchSize = Math.round(clampNumber(s.batchSize, 1, 40, DEFAULT_SETTINGS.batchSize));
     s.batchChars = Math.round(clampNumber(s.batchChars, 200, 6000, DEFAULT_SETTINGS.batchChars));
     s.concurrency = Math.round(clampNumber(s.concurrency, 1, 10, DEFAULT_SETTINGS.concurrency));
+    s.rpm = Math.round(clampNumber(s.rpm, 0, 6000, DEFAULT_SETTINGS.rpm));
     s.maxRetries = Math.round(clampNumber(s.maxRetries, 0, 5, DEFAULT_SETTINGS.maxRetries));
     s.fontScale = Math.round(clampNumber(s.fontScale, 70, 150, DEFAULT_SETTINGS.fontScale));
     if (!['inline', 'columns', 'replace'].includes(s.displayMode)) s.displayMode = DEFAULT_SETTINGS.displayMode;
@@ -155,6 +182,7 @@
     const current = await loadSettings();
     const next = normalizeSettings(Object.assign({}, current, patch));
     await chrome.storage.sync.set({ [SETTINGS_KEY]: next });
+    await stamp(SETTINGS_STAMP_KEY);
     return next;
   }
 
@@ -185,6 +213,7 @@
     if (trimmed) map[id] = trimmed;
     else delete map[id];
     await chrome.storage.local.set({ [API_KEYS_KEY]: map });
+    await stamp(API_KEYS_STAMP_KEY);
     // 旧键的值已并入 map，留着只会让"清除密钥"看起来没生效
     if (id === DEFAULT_PROVIDER.id) await chrome.storage.local.remove(LEGACY_API_KEY);
     return trimmed;
@@ -200,7 +229,10 @@
         changed = true;
       }
     }
-    if (changed) await chrome.storage.local.set({ [API_KEYS_KEY]: map });
+    if (changed) {
+      await chrome.storage.local.set({ [API_KEYS_KEY]: map });
+      await stamp(API_KEYS_STAMP_KEY);
+    }
     return map;
   }
 
@@ -597,12 +629,37 @@
       .join('');
   }
 
+  /* ------------------------------ 宿主浏览器 ------------------------------ */
+
+  /**
+   * 认出 Edge：UA 里有 `Edg/`，userAgentData.brands 里有「Microsoft Edge」。
+   * 只用来改文案（扩展页地址不一样），功能上 Edge 与 Chrome 走的是同一份 Chromium。
+   */
+  function isEdge() {
+    const brands = globalThis.navigator?.userAgentData?.brands;
+    if (Array.isArray(brands)) return brands.some((b) => /Microsoft Edge/i.test(b.brand || ''));
+    return /\bEdg[A-Z]?\//.test(globalThis.navigator?.userAgent || '');
+  }
+
+  /** 「扩展管理页」在 Chrome 是 chrome://extensions，在 Edge 是 edge://extensions */
+  function extensionsPageUrl() {
+    return isEdge() ? 'edge://extensions' : 'chrome://extensions';
+  }
+
+  /** 面向用户的浏览器名，用于「请到 Edge 的设置里…」这类提示 */
+  function browserName() {
+    return isEdge() ? 'Edge' : 'Chrome';
+  }
+
   globalThis.DST = {
     DEFAULT_SETTINGS,
     DEFAULT_PROVIDER,
     MAX_PROVIDERS,
     SETTINGS_KEY,
     API_KEYS_KEY,
+    SETTINGS_STAMP_KEY,
+    API_KEYS_STAMP_KEY,
+    readStamp,
     normalizeSettings,
     normalizeProvider,
     activeProvider,
@@ -637,6 +694,9 @@
     MAX_SPEAK_CHARS,
     isTranslationOnlyModel,
     mtTargetLang,
-    hashText
+    hashText,
+    isEdge,
+    extensionsPageUrl,
+    browserName
   };
 })();

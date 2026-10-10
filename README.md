@@ -1,6 +1,6 @@
 # MikeLingo
 
-多接口 AI 网页翻译 Chrome 扩展（Manifest V3）：整页对照翻译、划词翻译、快速翻译小窗，
+多接口 AI 网页翻译扩展（Manifest V3，**Chrome 与 Microsoft Edge 通用**）：整页对照翻译、划词翻译、快速翻译小窗，
 兼容任意 OpenAI 协议接口（DeepSeek / 硅基流动 / 智谱 / Kimi / 通义 / 豆包 / Gemini / OpenAI 等），地址与模型可自定义。
 
 ## 功能
@@ -24,23 +24,58 @@
 - **只译外文**：中文占比高的段落自动跳过；`pre / code / script` 等不翻译
 - **渐进翻译**：仅翻译进入视口的段落，动态加载的内容自动补翻
 - **本地缓存**：IndexedDB 缓存译文（按 `模型 + 目标语言 + 原文` 命中），重复内容不重复计费
+- **云同步**：生词本、设置、接口配置和 API Key 同步到**你自己的**网盘（WebDAV）或 GitHub Gist，
+  Chrome 与 Edge、换电脑都能自动带出来。没有我们的服务器，API Key 先在本机用主口令加密，云端只有密文
 - **可配置**：API 地址、模型、温度、并发数、分批大小、超时、译文字体与样式、按站点自动翻译
 
 ## 安装（加载未打包扩展）
 
-1. Chrome 打开 `chrome://extensions/`
-2. 右上角开启「开发者模式」
-3. 点「加载已解压的扩展程序」，**选择项目里的 `MikeLingo/` 子目录**（含 `manifest.json` 的那一层），不是项目根目录
+1. 打开扩展管理页：Chrome 是 `chrome://extensions/`，**Edge 是 `edge://extensions/`**
+2. 开启「开发者模式」（Chrome 在右上角，Edge 在左侧栏底部）
+3. 点「加载已解压的扩展程序」（Edge 叫「加载解压缩的扩展」），**选择项目里的 `MikeLingo/` 子目录**（含 `manifest.json` 的那一层），不是项目根目录
 4. 首次使用点扩展图标 → 「设置」，在「翻译接口」里填入 API Key（DeepSeek 为 `sk-` 开头），点「发送测试请求」确认连通后保存
 
-`MikeLingo/` 是 Chrome 长期加载的固定目录，之后升级只覆盖这个目录的内容。
+`MikeLingo/` 是浏览器长期加载的固定目录，之后升级只覆盖这个目录的内容。
 
 manifest 里带了 `key` 字段，**扩展 ID 固定为 `hkoknpdlmemnbllkdijbcdbkkcmpljmf`**——
-未打包扩展的 ID 默认按目录绝对路径派生，项目一挪窝 Chrome 就当成新扩展，
+未打包扩展的 ID 默认按目录绝对路径派生，项目一挪窝浏览器就当成新扩展，
 而 `chrome.storage`（API Key、设置、生词本）按 ID 分桶，ID 一变数据就全"消失"。
-钉死 ID 之后，换目录、换盘符、重装 Chrome 都不会再丢。详见 [keys/README.md](keys/README.md)。
+钉死 ID 之后，换目录、换盘符、重装浏览器都不会再丢。Chrome 和 Edge 用同一套 ID 派生规则，
+所以两边加载出来的扩展 ID 完全一致。详见 [keys/README.md](keys/README.md)。
 
 API Key 存在 `chrome.storage.local`（不随账号同步），按接口分别保存，页面上只回显脱敏预览；留空保存表示保持原密钥不变，删除接口会连带清除它的密钥。
+
+### 关于 Microsoft Edge
+
+Edge 是 Chromium 内核，MikeLingo 的全部功能在 Edge 上原样可用，**不需要单独出一个 Edge 版本**——
+同一个 `MikeLingo/` 目录、同一个发布包，Chrome 和 Edge 都能加载。已在 Edge 151 上跑完整套端到端回归
+（`node tools/e2e-test.cjs --edge`，194 项断言全过）。
+
+逐项核对下来，扩展用到的能力 Edge 全部具备：
+
+| 用到的能力 | Edge | 说明 |
+| --- | --- | --- |
+| Manifest V3 + Service Worker | ✅ | 和 Chrome 同一套 |
+| `chrome.*` 命名空间 | ✅ | Edge 不需要改写成 `browser.*`（那是 Firefox） |
+| `chrome.tts` 系统语音合成 | ✅ | 同样读 Windows 语音包 |
+| `chrome.offscreen` 后台播放发音 | ✅ | Edge 109+ |
+| `chrome.runtime.getContexts` | ✅ | Edge 116+，代码里对更低版本已有回落 |
+| `chrome.storage.sync / session` | ✅ | sync 走 Microsoft 账号而不是 Google 账号 |
+| 快捷键 `Alt+T` / `Alt+Shift+V` | ✅ | 未与 Edge 自带快捷键冲突，改绑在 `edge://extensions/shortcuts` |
+| 设置页一键更新（File System Access） | ✅ | `showDirectoryPicker` 可用 |
+| manifest 的 `key`（固定扩展 ID） | ✅ | 派生出的 ID 与 Chrome 一致 |
+
+两点差异，都已在代码和文档里处理：
+
+- **扩展管理页地址不同**：Chrome 是 `chrome://extensions`，Edge 是 `edge://extensions`。
+  提示文案会按当前浏览器自动切换（`DST.extensionsPageUrl()`，见 `src/common/shared.js`）。
+- **两边的数据默认各存各的**：Chrome 和 Edge 是两份独立的用户配置，扩展 ID 虽然一样，
+  但 API Key、设置、生词本互不相通。打开下面的[「备份与同步」](#备份与同步多设备--多浏览器)，
+  两边填同一份配置就能互通；不想联网就用备份文件搬。
+
+> 想上架 Edge 加载项商店的话，`tools/pack.cjs` 打出的 zip 可以直接提交到
+> [Microsoft Partner Center](https://partner.microsoft.com/dashboard/microsoftedge)，包格式与 Chrome 应用商店一致。
+> 注意商店分发的扩展 ID 由商店重新分配，会和现在这个开发者模式的 ID 不同（等于换了新的数据桶）。
 
 ## 使用
 
@@ -57,18 +92,24 @@ API Key 存在 `chrome.storage.local`（不随账号同步），按接口分别�
 | 复习生词 | 生词本页面切到「复习」；空格看答案，`1`–`4` 评分 |
 | 切换翻译接口 | 弹窗底部的「翻译接口」下拉，或设置页勾选（互斥，只有一个生效） |
 | 本站自动翻译 | 弹窗里打开开关，下次访问该域名自动翻译 |
+| 多设备同步数据 | 设置页「备份与同步 → 云同步」填好网盘或 GitHub，点「立即同步」 |
+| 搬家 / 存档 | 设置页「备份与同步 → 导出备份」，到新浏览器「导入备份」 |
 
 ## 配置说明
 
-设置页（`chrome://extensions` → 详细信息 → 扩展程序选项）：
+设置页（扩展管理页 → 详细信息 → 扩展程序选项；Edge 在 `edge://extensions` → 详细信息 → 扩展选项）：
 
 - **翻译接口**：最多 10 个，每个接口独立配置地址 / 模型 / 密钥 / 温度 / 超时，并可单独「发送测试请求」；
   勾选哪个就用哪个（互斥），切换立即生效。默认地址 `https://api.deepseek.com`、模型 `deepseek-chat`，
   兼容任何 OpenAI 格式的 `/chat/completions` 接口。
-  填 `qwen-mt-turbo` / `qwen-mt-plus` 这类**翻译专用模型**时，扩展会自动改成逐条发送并传 `translation_options`
+  填 `qwen-mt-flash` / `qwen-mt-plus` 这类**翻译专用模型**时，扩展会自动改成逐条发送并传 `translation_options`
   （该类模型不看 system 提示词，自定义提示词与温度对它无效，设置页会给出提示）
-- **并发数 / 每批段落数 / 每批字符上限**：并发默认 3、每批 10 段或 1800 字符，站点段落多时可调高，报 429 时调低
-- **超时与重试**：默认 60s 超时、失败重试 2 次（指数退避）
+- **并发数 / 每批段落数 / 每批字符上限**：并发默认 3、每批 10 段或 1800 字符，站点段落多时可调高
+- **每分钟请求上限（RPM）**：默认 0（不限）。所有请求都从后台的一道闸门过，遇到 429 会自动进入冷却、
+  放慢节奏并重试，恢复后再逐步提速，一般不用管；阿里云百炼这类按 RPM 卡的接口，
+  也可以直接按自己的额度填死（免费额度常见 60）
+- **超时与重试**：默认 60s 超时、失败重试 2 次（指数退避）；429 会在此基础上额外多重试几次，
+  并遵守服务端返回的 `Retry-After`
 - **译文样式**：虚线下划线 / 实线 / 引用条 / 高亮底色 / 无
 - **译文字体**：默认中文字体栈（PingFang SC、Microsoft YaHei、Noto Sans SC 回退），字号可按原文百分比缩放
 
@@ -91,12 +132,12 @@ API Key 存在 `chrome.storage.local`（不随账号同步），按接口分别�
 
 ### 翻译和详解用两个不同的模型
 
-翻译适合用 `qwen-mt-turbo` 这类**翻译专用模型**（便宜、专精），但它做不了详解——不看提示词，
+翻译适合用 `qwen-mt-flash` 这类**翻译专用模型**（便宜、专精），但它做不了详解——不看提示词，
 只会把原文再翻一遍。所以两者可以分开配：
 
 | 场景 | 怎么配 |
 | --- | --- |
-| **同一家服务商**（同地址同密钥，只是模型不同） | 接口的「模型（翻译用）」填 `qwen-mt-turbo`，设置页「划词翻译 → **详解使用的模型**」填 `qwen-plus`。**不用配第二个接口** |
+| **同一家服务商**（同地址同密钥，只是模型不同） | 接口的「模型（翻译用）」填 `qwen-mt-flash`，设置页「划词翻译 → **详解使用的模型**」填 `qwen-plus`。**不用配第二个接口** |
 | **两家不同服务商** | 在「翻译接口」里再加一个接口，然后把「详解使用的接口」指向它 |
 | **两者共用一个模型** | 「详解使用的模型」留空、「详解使用的接口」选「跟随翻译接口」即可 |
 
@@ -108,6 +149,75 @@ API Key 存在 `chrome.storage.local`（不随账号同步），按接口分别�
 - 模型没按格式返回时会明确说"没按格式返回，可换个模型"，不会静默空白
 - **翻译专用模型（`qwen-mt-*`）不支持详解**——它们不看 system 提示词，只会把原文再翻一遍，
   这种情况下会提示切换到 `deepseek-chat` 这类通用对话模型
+
+## 备份与同步（多设备 / 多浏览器）
+
+> **单机使用不需要做任何配置。** 生词本、设置和 API Key 本来就存在本机，
+> 设置页里云同步整块是**默认折叠**的，不勾「启用云同步」就完全不联网、不发任何请求。
+> 换电脑时用「导出备份 / 导入备份」一个文件搬走就够了。
+
+生词本、设置、接口配置和 API Key 可以同步到**你自己的**网盘或 GitHub。
+**没有我们的服务器**：不需要注册账号，数据只落在你自己的账号里，扩展只负责搬运。
+两台浏览器（Chrome 与 Edge、公司电脑与家里电脑）填同一份配置就互通了。
+
+### 两种同步方式，选一个
+
+| 方式 | 要准备什么 | 适合 |
+| --- | --- | --- |
+| **WebDAV** | 网盘地址 + 用户名 + 应用密码。坚果云免费够用，在「账户信息 → 安全选项 → 添加应用」里生成应用密码 | 大多数人；国内直连快 |
+| **GitHub Gist** | 一个有 `gist` 权限的 Token（细粒度 Token 勾 `Gists: Read and write`） | 已有 GitHub 账号、不想再开网盘 |
+
+设置页 →「备份与同步」→ 展开「云同步」→ 勾「启用云同步」→ 填好上面任一种 → 点「测试连接」确认能连上 → 「立即同步」。
+Gist ID 留空即可，首次同步会自动建一个**私密** Gist 并把 id 记下来。
+
+### API Key 怎么保证安全
+
+要把密钥同步走，就得先解决"云端会不会看到它"。做法是**端到端加密**：
+
+- 你设一个**主口令**，密钥在本机用 PBKDF2-SHA256（31 万次迭代）派生出的 AES-256-GCM 密钥加密后才上传
+- 网盘方、GitHub、以及任何拿到那个文件的人，**没有口令都解不开**；e2e 里有一条断言专门检查云端文件里搜不到明文密钥
+- **主口令只留在本机，永远不上传**。两台浏览器要填同一个口令才解得开对方的密钥
+- 忘了口令没有找回途径——我们也解不开，只能重新填一次 API Key
+- 不想同步密钥就把「同步 API Key」取消勾选，生词本和设置照样同步
+
+同步配置本身（网盘地址、密码、Token、主口令）也**不进备份文件**，
+否则两台机器会互相覆盖对方的同步配置，网盘密码还会被传到网盘自己那儿去。
+
+### 冲突了怎么办：只合并，不覆盖
+
+同步永远走**先读远端 → 与本机合并 → 把合并结果写回去**这一条路，不做任何方向的覆盖——
+两台机器各加了几个词是最常见的情况，任何一侧的覆盖都会当场吃掉数据。
+
+| 数据 | 合并规则 |
+| --- | --- |
+| 生词本 | 按词合并；同一个词取**复习进度靠前**的那条（reps 多的），不会把背熟的词打回新词 |
+| 删除的词 | 记一条删除墓碑跟着同步，另一台不会再把它还回来；墓碑保留半年 |
+| 设置 | 整体按改动时间后写优先 |
+| 接口列表 | 按 id **取并集**，同 id 冲突取改得晚的那份 |
+| 自动翻译网站 | 取并集 |
+| API Key | 按接口 id 取并集，同 id 冲突取改得晚的那份 |
+
+代价是**删接口、删自动翻译网站这两个动作不会跨设备传播**（另一台同步回来会复活）。
+这是刻意的取舍：误删比误留难挽回得多。生词本的删除有墓碑，是会传播的。
+
+写回时带乐观锁（WebDAV 的 `ETag`，Gist 的 `updated_at`）；远端在这期间被另一台改过就重新读一遍再合并，最多重来 3 次。
+
+### 什么时候会自动同步
+
+打开「自动同步」后：浏览器启动时、生词本或设置有改动后（防抖 8 秒）。
+自动同步失败只记录状态，不弹窗、不影响翻译，原因显示在设置页的「同步状态」里。
+
+> 代码里还有一条「每 30 分钟兜底同步」，走 `chrome.alarms`，但 **manifest 里没有声明 `alarms` 权限**——
+> 多一个权限，走商店渠道升级就要让所有用户重新授权一次，为一条兜底定时不值得。
+> 代码对权限缺失做了兼容（`chrome.alarms?.create?.()`），要开只需在 manifest 的 `permissions` 里加回 `"alarms"`。
+
+### 不想联网：备份文件
+
+设置页 →「备份与同步 → 导出备份」得到一个 JSON，到新浏览器点「导入备份」即可，
+生词本、设置、接口配置一起过去。勾了「同步 API Key」时，备份文件里的密钥同样是加密的，导入要填对主口令。
+
+> 手动导入和自动同步有一处刻意的区别：**手动导入不受本机删除记录阻挡**。
+> 你清空生词本之后再导入备份，是明确的"把这份还原回来"，不该被之前的删除记录挡着一条都进不来。
 
 ## 生词本与复习
 
@@ -163,9 +273,14 @@ npm install
 npx puppeteer browsers install chrome   # Chrome 137+ 移除了 --load-extension，需用 Chrome for Testing
 
 node tools/generate-icons.cjs           # 重新生成 MikeLingo/icons/*.png（渐变圆角底 + 「A / 文」双字形）
-node tools/mock-server.cjs 8787         # 单独起假接口 + 测试页 + 假词典 /dict/en/<word> + 假发音 /dictvoice + 假语音合成 /gettts + 假音频 /audio/*
-node tools/e2e-test.cjs                 # 端到端回归（109 项断言，全程使用 mock 接口，不消耗额度也不出网）
+node tools/mock-server.cjs 8787         # 单独起假接口 + 测试页 + 假词典 /dict/en/<word> + 假发音 /dictvoice
+                                        # + 假语音合成 /gettts + 假音频 /audio/* + 假 WebDAV /dav/* + 假 Gist /gists
+node tools/e2e-test.cjs                 # 端到端回归（194 项断言，全程使用 mock 接口，不消耗额度也不出网）
+node tools/e2e-test.cjs --edge          # 同一套断言换本机 Microsoft Edge 跑一遍（截图另存 screenshots/edge/）
 ```
+
+`--edge` 默认找 `C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`，
+装在别处用环境变量 `EDGE_PATH` 指定。
 
 真实接口验证（密钥只经环境变量传入，不落盘）：
 
@@ -183,10 +298,10 @@ $env:DEEPSEEK_API_KEY="sk-..."; node tools/real-api-test.cjs
 
 设置页 →「版本与更新」→ **检查更新** → **下载并安装**。
 它会从 GitHub Releases 下载发布包、解包、写回安装目录，然后自动重载扩展——
-不用跑批处理，也不用去 `chrome://extensions` 点刷新。
+不用跑批处理，也不用去扩展管理页点刷新。
 
 首次安装时浏览器会让你**选一次安装目录**（就是 `MikeLingo/`）并点「允许修改文件」，之后就记住了。
-这是 Chrome 的 File System Access 授权，扩展本身没有任意写文件的权限。
+这是浏览器的 File System Access 授权（Chrome / Edge 都支持），扩展本身没有任意写文件的权限。
 
 因为是"从网上下东西覆盖本机文件"，装之前卡了四道校验，任一不过就中止并说明原因：
 只认配置的那个 GitHub 仓库和 GitHub 自家域名；包内路径只允许 `manifest.json` / `src/**` / `icons/**`；
@@ -195,7 +310,7 @@ $env:DEEPSEEK_API_KEY="sk-..."; node tools/real-api-test.cjs
 ### 2. 批处理（离线、可回滚到任意历史版本）
 
 双击 `Release/v<版本>/一键升级.bat`，它把该版本覆盖回 `..\..\MikeLingo`，
-然后到 `chrome://extensions` 点一下 MikeLingo 卡片上的「刷新」。
+然后到扩展管理页（`chrome://extensions` / `edge://extensions`）点一下 MikeLingo 卡片上的「刷新」。
 批处理里的路径全部由 `%~dp0` 推导，**整个项目文件夹换位置、改名都照样能用**；
 `src/`、`icons/` 用 `robocopy /MIR` 镜像覆盖，旧版本里删掉的文件不会残留。
 装**旧版本**（回滚）只能用这条。
@@ -204,9 +319,9 @@ $env:DEEPSEEK_API_KEY="sk-..."; node tools/real-api-test.cjs
 
 从 Releases 下载 zip，解压后覆盖 `MikeLingo/`，再去扩展页刷新。
 
-> 三种方式都只动 `MikeLingo/` 里的程序文件，**不碰 Chrome 的用户数据**：
+> 三种方式都只动 `MikeLingo/` 里的程序文件，**不碰浏览器的用户数据**：
 > API Key、设置、生词本都挂在扩展 ID 下，而 ID 已被 manifest 的 `key` 钉死，升级不会丢。
-> 唯一会丢数据的操作是在 `chrome://extensions` 点「移除」——那是卸载，别点。
+> 唯一会丢数据的操作是在扩展管理页点「移除」——那是卸载，别点。
 
 ## 发布一个新版本
 
@@ -242,7 +357,7 @@ gh release view v1.10.0 --json tagName,assets --jq '{tag: .tagName, assets: [.as
 ## 目录结构
 
 ```
-MikeLingo/                  ← 主程序：chrome://extensions 加载的就是这个目录
+MikeLingo/                  ← 主程序：扩展管理页加载的就是这个目录
   manifest.json
   src/ icons/               （明细见下）
 Release/
@@ -261,10 +376,14 @@ README.md CHANGELOG.md      文档
 ```
 manifest.json
 src/
-  common/shared.js          默认配置、多接口结构与旧版迁移、按接口存取密钥、脱敏、可译性判断（content script 与 module 双兼容）
+  common/shared.js          默认配置、多接口结构与旧版迁移、按接口存取密钥、脱敏、可译性判断、宿主浏览器识别（content script 与 module 双兼容）
   common/schedule.js        SM-2 复习排程（纯函数，后台与生词本页面共用同一份，ES module）
+  common/crypto.js          PBKDF2 + AES-GCM，API Key 上云前的端到端加密
+  common/backup.js          备份文件格式与纯粹的合并规则（设置 / 接口 / 密钥 / 删除墓碑），同步与导入共用
   background/service-worker.js  接口调用、分段协议与容错、缓存、重试、消息路由、右键菜单
   background/vocab-store.js 生词本 IndexedDB（增删改查、复习队列、导入导出）与词典结果缓存
+  background/sync.js        云同步编排：读远端 → 合并 → 写回、冲突重试、自动同步触发
+  background/sync-remote.js WebDAV 与 GitHub Gist 两个后端适配器（只管读写一个文件）
   background/dictionary.js  音标 / 真人发音查询（dictionaryapi.dev，按口音挑音频）
   background/speech.js      朗读：offscreen 依次试各个真人音源，都失败回落 chrome.tts 语音合成
   offscreen/                不可见的音频播放文档（绕开宿主页面 CSP）

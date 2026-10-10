@@ -3,8 +3,8 @@
  *
  * 为什么能写本地文件：扩展没有任意写文件的 API，但设置页是个普通页面，
  * 可以用 File System Access（showDirectoryPicker）让用户**授权一次**安装目录，
- * 句柄存进 IndexedDB 复用。写完调 chrome.runtime.reload()，连 chrome://extensions
- * 那一下刷新都省了。
+ * 句柄存进 IndexedDB 复用。写完调 chrome.runtime.reload()，连扩展管理页
+ * （chrome://extensions / edge://extensions）那一下刷新都省了。
  *
  * 安全上卡了四道，缺一不可——毕竟这是"从网上下东西覆盖本机文件"：
  *   1. 只从设置里配置的那个 GitHub 仓库取，且资源域名必须是 github 自家的
@@ -201,7 +201,7 @@ async function assertInstallDir(dir) {
   try {
     file = await (await dir.getFileHandle('manifest.json')).getFile();
   } catch {
-    throw new Error(`「${dir.name}」里没有 manifest.json，这不是扩展的安装目录。请选 chrome://extensions 里加载的那个 MikeLingo 目录`);
+    throw new Error(`「${dir.name}」里没有 manifest.json，这不是扩展的安装目录。请选 ${DST.extensionsPageUrl()} 里加载的那个 MikeLingo 目录`);
   }
   let manifest;
   try {
@@ -218,7 +218,7 @@ async function assertInstallDir(dir) {
 /** 取安装目录：有存过的句柄就复用（只需点一次「允许」），否则让用户选 */
 export async function pickInstallDir({ forcePick = false } = {}) {
   if (!window.showDirectoryPicker) {
-    throw new Error('当前浏览器不支持目录授权（需要 Chrome 86+），请改用 Release 目录里的「一键升级.bat」');
+    throw new Error(`当前浏览器不支持目录授权（需要 ${DST.browserName()} 86+），请改用 Release 目录里的「一键升级.bat」`);
   }
   if (!forcePick) {
     const saved = await readHandle();

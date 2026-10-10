@@ -26,10 +26,7 @@
         <section class="card">
           <h2>翻译接口</h2>
           <p class="card-desc">
-            可以配置多个接口，<strong>勾选哪一个就用哪一个</strong>——同一时刻只有一个生效，切换后立即生效。
-            兼容 OpenAI 协议的服务均可（路径自动拼接 <code>/chat/completions</code>）。
-            密钥仅保存在本机浏览器（chrome.storage.local），不会同步到云端，也不会出现在页面或日志中。
-            可前往 <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noreferrer noopener">DeepSeek 开放平台</a> 创建密钥。
+            可以配置多个接口，<strong>勾选哪一个就用哪一个</strong>——同一时刻只有一个生效，切换后立即生效。兼容 OpenAI 协议的服务均可（路径自动拼接 <code>/chat/completions</code>）。密钥仅保存在本机浏览器（chrome.storage.local），不会同步到云端，也不会出现在页面或日志中。可前往 <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noreferrer noopener">DeepSeek 开放平台</a> 创建密钥。
           </p>
 
           <ul class="provider-list" id="providerList"></ul>
@@ -60,32 +57,25 @@
               <button type="button" class="ghost danger p-remove">删除</button>
             </div>
 
+            <!--
+              常用的只有两件事：选模型、填 Key。这两样留在外面，保存按钮就贴在 Key 后面，
+              填完当场能存；名称／地址／温度／超时按服务商预设都已填好，绝大多数人不会动，收进「更多设置」。
+            -->
             <div class="provider-body" hidden>
-              <div class="grid-2">
-                <div class="field">
-                  <label class="p-name-label">名称</label>
-                  <input class="p-name" type="text" spellcheck="false" maxlength="40" placeholder="例如：DeepSeek 官方" />
-                </div>
-                <div class="field">
-                  <label class="p-model-label">模型（翻译用）</label>
-                  <!-- 候选模型按这一行填的 API 地址生成，list 属性在 renderProviders 里接上 -->
-                  <input class="p-model" spellcheck="false" placeholder="deepseek-chat" />
-                  <datalist class="p-models"></datalist>
-                  <p class="help">
-                    模型名以服务商文档为准；火山方舟等平台可能需要填「接入点 ID」（<code>ep-</code> 开头）。
-                    词典详解可以用另一个模型，在下面「划词翻译」里单独设。
-                  </p>
-                  <p class="help mt-note p-mtnote" hidden>
-                    翻译专用模型：会忽略自定义提示词，只按目标语言直译；扩展已自动改为逐条发送并传 <code>translation_options</code>。
-                  </p>
-                  <p class="error p-model-error" hidden></p>
-                </div>
-              </div>
-
               <div class="field">
-                <label class="p-baseUrl-label">API 地址</label>
-                <input class="p-baseUrl" type="url" spellcheck="false" placeholder="https://api.deepseek.com" />
-                <p class="error p-baseUrl-error" hidden></p>
+                <label class="p-model-label">模型</label>
+                <!--
+                  候选模型按这个接口的 API 地址生成（见 renderProviders）。
+                  这里用真下拉而不是 input+datalist：datalist 会按输入框里已有的文字过滤候选，
+                  框里存着旧模型名时一条都匹配不上，看着就是「下拉打不开」。
+                -->
+                <select class="p-models"></select>
+                <input class="p-model" spellcheck="false" placeholder="deepseek-chat" />
+                <p class="help p-modelhelp">下拉里是这家服务商的常用模型；要用别的就选「自定义…」再手填。</p>
+                <p class="help mt-note p-mtnote" hidden>
+                  翻译专用模型：会忽略自定义提示词，只按目标语言直译；扩展已自动改为逐条发送并传 <code>translation_options</code>。
+                </p>
+                <p class="error p-model-error" hidden></p>
               </div>
 
               <div class="field">
@@ -93,29 +83,48 @@
                 <div class="input-row">
                   <input class="p-key" type="password" autocomplete="off" spellcheck="false" placeholder="sk-..." />
                   <button type="button" class="ghost p-showkey" aria-pressed="false">显示</button>
-                  <button type="button" class="ghost danger p-clearkey">清除</button>
+                  <button type="button" class="primary p-save">保存</button>
                 </div>
                 <p class="help p-keyhelp"></p>
                 <p class="error p-key-error" hidden></p>
+                <p class="test-result p-saveresult"></p>
               </div>
 
-              <div class="grid-2">
-                <div class="field">
-                  <label class="p-temperature-label">温度（temperature）</label>
-                  <input class="p-temperature" type="number" min="0" max="2" step="0.1" />
-                  <p class="help">DeepSeek 官方建议翻译场景使用 1.3</p>
-                </div>
-                <div class="field">
-                  <label class="p-timeout-label">单次请求超时（秒）</label>
-                  <input class="p-timeout" type="number" min="5" max="300" step="5" />
-                  <p class="help">长段落或推理模型建议设置更长</p>
-                </div>
-              </div>
+              <details class="adv p-adv">
+                <summary>更多设置（名称、API 地址、温度、超时、测试连接）</summary>
+                <div class="adv-body">
+                  <div class="field">
+                    <label class="p-name-label">名称</label>
+                    <input class="p-name" type="text" spellcheck="false" maxlength="40" placeholder="例如：DeepSeek 官方" />
+                  </div>
 
-              <div class="actions-row">
-                <button type="button" class="secondary p-test">发送测试请求</button>
-                <p class="test-result p-testresult"></p>
-              </div>
+                  <div class="field">
+                    <label class="p-baseUrl-label">API 地址</label>
+                    <input class="p-baseUrl" type="url" spellcheck="false" placeholder="https://api.deepseek.com" />
+                    <p class="help">按服务商添加时已自动填好；只有自建或代理地址才需要改。</p>
+                    <p class="error p-baseUrl-error" hidden></p>
+                  </div>
+
+                  <div class="grid-2">
+                    <div class="field">
+                      <label class="p-temperature-label">温度（temperature）</label>
+                      <input class="p-temperature" type="number" min="0" max="2" step="0.1" />
+                      <p class="help">DeepSeek 官方建议翻译场景使用 1.3</p>
+                    </div>
+                    <div class="field">
+                      <label class="p-timeout-label">单次请求超时（秒）</label>
+                      <input class="p-timeout" type="number" min="5" max="300" step="5" />
+                      <p class="help">长段落或推理模型建议设置更长</p>
+                    </div>
+                  </div>
+
+                  <div class="actions-row">
+                    <button type="button" class="secondary p-test">发送测试请求</button>
+                    <button type="button" class="ghost danger p-clearkey">清除密钥</button>
+                    <p class="test-result p-testresult"></p>
+                  </div>
+                </div>
+              </details>
             </div>
           </li>
         </template>
@@ -143,12 +152,27 @@
 
           <div class="grid-2">
             <div class="field">
+              <label for="rpm">每分钟请求上限</label>
+              <input id="rpm" type="number" min="0" max="6000" step="10" />
+              <p class="help">
+                0 = 不限，遇到 429 会自动放慢并重试。阿里云百炼等按 RPM 限流的接口可按自己的额度填（免费额度常见 60）
+              </p>
+            </div>
+            <div class="field">
               <label for="batchSize">每批段落数</label>
               <input id="batchSize" type="number" min="1" max="40" step="1" />
             </div>
+          </div>
+
+          <div class="grid-2">
             <div class="field">
               <label for="batchChars">每批最大字符数</label>
               <input id="batchChars" type="number" min="200" max="6000" step="100" />
+            </div>
+            <div class="field">
+              <label for="maxRetries">失败重试次数</label>
+              <input id="maxRetries" type="number" min="0" max="5" step="1" />
+              <p class="help">限流（429）会在此基础上额外多重试几次</p>
             </div>
           </div>
 
@@ -243,10 +267,7 @@
               <option value="off">关闭：只给译文</option>
             </select>
             <p class="help">
-              详解会<strong>另外发一次请求</strong>（约多花一条翻译的额度），给出分词性的释义、双语例句、
-              用法辨析和相关词，专有名词会说明是什么、在哪、为什么有名。
-              自动模式只对 5 个英文单词 / 12 个汉字以内的短内容发起，长句子仍需手动点「详细解释」。
-              同一个词的详解会缓存在本机，再划一次不重复计费。
+              详解会<strong>另外发一次请求</strong>（约多花一条翻译的额度），给出分词性的释义、双语例句、用法辨析和相关词，专有名词会说明是什么、在哪、为什么有名。自动模式只对 5 个英文单词 / 12 个汉字以内的短内容发起，长句子仍需手动点「详细解释」。同一个词的详解会缓存在本机，再划一次不重复计费。
             </p>
           </div>
           <div class="grid-2" id="explainProviderField">
@@ -257,19 +278,15 @@
             </div>
             <div class="field">
               <label for="explainModel">详解使用的模型</label>
-              <input id="explainModel" type="text" list="explainModels" placeholder="留空 = 跟随该接口的模型" />
               <!-- 候选只列左边所选接口支持的通用模型，翻译专用模型不在其中：详解用不了 -->
-              <datalist id="explainModels"></datalist>
+              <select id="explainModels"></select>
+              <input id="explainModel" type="text" placeholder="留空 = 跟随该接口的模型" />
               <p class="help" id="explainModelHint"></p>
             </div>
           </div>
           <p class="help">
             <strong>翻译和详解可以用两个不同的模型。</strong>最常见的搭配：翻译用
-            <code>qwen-mt-turbo</code> 这类<strong>翻译专用模型</strong>（便宜、专精），
-            详解用通用对话模型（<code>qwen-plus</code>、<code>deepseek-chat</code> 等）。
-            两者服务商相同时，接口选「跟随翻译接口」、这里只填模型名就行，地址和密钥都不用再配一遍；
-            不同服务商才需要在上面「翻译接口」里另加一个接口，再到左边选它。
-            <strong>翻译专用模型做不了详解</strong>——它们不看提示词，只会把原文再翻一遍。
+            <code>qwen-mt-flash</code> 这类<strong>翻译专用模型</strong>（便宜、专精），详解用通用对话模型（<code>qwen-plus</code>、<code>deepseek-chat</code> 等）。两者服务商相同时，接口选「跟随翻译接口」、这里只填模型名就行，地址和密钥都不用再配一遍；不同服务商才需要在上面「翻译接口」里另加一个接口，再到左边选它。<strong>翻译专用模型做不了详解</strong>——它们不看提示词，只会把原文再翻一遍。
           </p>
           <p class="field-error" id="explainProviderWarn" hidden></p>
         </section>
@@ -277,10 +294,8 @@
         <section class="card">
           <h2>音标、发音与生词本</h2>
           <p class="card-desc">
-            划词卡片和快速翻译里，选中<strong>单个英文单词</strong>时会显示音标和真人发音；
-            短语和句子没有音标，朗读会用系统语音合成。音标来自免费的
-            <a href="https://dictionaryapi.dev" target="_blank" rel="noreferrer noopener">dictionaryapi.dev</a>，
-            不需要密钥，查询结果缓存在本机，查不到不影响翻译。
+            划词卡片和快速翻译里，选中<strong>单个英文单词</strong>时会显示音标和真人发音；短语和句子没有音标，朗读会用系统语音合成。音标来自免费的
+            <a href="https://dictionaryapi.dev" target="_blank" rel="noreferrer noopener">dictionaryapi.dev</a>，不需要密钥，查询结果缓存在本机，查不到不影响翻译。
           </p>
 
           <label class="check">
@@ -318,11 +333,7 @@
               <option value="none">不联网，只用系统语音合成</option>
             </select>
             <p class="help">
-              朗读需要联网：<code>dict.youdao.com</code> 是词典录音，只认单词和短词组，句子会失败；
-              <code>fanyi.baidu.com</code> 是语音合成，整句、中文、日文都能读，1000 字以内。
-              两者国内外都能直连，dictionaryapi.dev 的音频节点则经常返回 502。
-              全都拿不到时改用系统语音合成——那条路不联网，但要求电脑装了对应语言的语音包。
-              <strong>朗读的内容会发给对应服务商</strong>；介意就选「不联网」。
+              朗读需要联网：<code>dict.youdao.com</code> 是词典录音，只认单词和短词组，句子会失败；<code>fanyi.baidu.com</code> 是语音合成，整句、中文、日文都能读，1000 字以内。两者国内外都能直连，dictionaryapi.dev 的音频节点则经常返回 502。全都拿不到时改用系统语音合成——那条路不联网，但要求电脑装了对应语言的语音包。<strong>朗读的内容会发给对应服务商</strong>；介意就选「不联网」。
             </p>
           </div>
 
@@ -354,11 +365,133 @@
         </section>
 
         <section class="card">
+          <h2>备份与同步</h2>
+          <!--
+            换行位置有讲究：中文和标签／英文之间的换行会被渲染成一个空格（CJK 之间才会被吃掉），
+            所以只在英文单词后面断行，否则页面上会冒出"GitHub， Chrome"这种多余空格。
+          -->
+          <p class="card-desc">
+            生词本、设置和 API Key 都存在本机浏览器里，平时不用管。换电脑或换浏览器时导出一个文件带走即可；
+            想让两台机器自动保持一致，再看下面的云同步。
+          </p>
+
+          <div class="field">
+            <label>备份文件</label>
+            <p class="help">
+              导出的文件含生词本、设置与接口配置。勾了云同步里的「同步 API Key」时，文件里的密钥是加密的，导入要填对主口令。
+            </p>
+            <div class="actions-row">
+              <button type="button" class="secondary" id="backupExport">导出备份</button><button type="button" class="secondary" id="backupImport">导入备份</button>
+              <input type="file" id="backupFile" accept="application/json,.json" hidden />
+              <p class="test-result" id="backupResult"></p>
+            </div>
+          </div>
+
+          <!--
+            云同步默认整块折起来：本地单机用完全不需要它，
+            但代码保留着，哪天要在两台机器之间自动同步，展开填一下就能用。
+          -->
+          <details class="adv" id="syncSection">
+            <summary>云同步（两台机器 / 两个浏览器自动保持一致）</summary>
+            <div class="adv-body">
+          <p class="card-desc">
+            把<strong>生词本、设置、接口配置和 API Key</strong> 同步到你自己的网盘或 GitHub，Chrome 和 Edge
+            填同一份配置就互通了。<strong>没有我们的服务器</strong>——数据只在你的账号里，扩展只负责搬运。API Key 会先用主口令在本机加密，云端拿到的是密文。
+          </p>
+
+          <label class="check">
+            <input type="checkbox" id="syncEnabled" />
+            <span>启用云同步</span>
+          </label>
+
+          <div id="syncBody">
+            <!--
+              存储位置和凭据是一次性的事：没配好时默认展开（新用户得看见要填什么），
+              配好之后由 loadSyncForm 收起来，平时只剩「立即同步」和状态两行。
+            -->
+            <details class="adv" id="syncAdv">
+              <summary>存储位置与凭据</summary>
+              <div class="adv-body">
+            <div class="field">
+              <label for="syncBackend">同步方式</label>
+              <select id="syncBackend">
+                <option value="webdav">WebDAV（坚果云 / Nextcloud / 群晖等）</option>
+                <option value="gist">GitHub Gist（私密 Gist，只需一个 Token）</option>
+              </select>
+              <p class="help" id="syncBackendHelp"></p>
+            </div>
+
+            <div id="syncWebdav">
+              <div class="field">
+                <label for="syncWebdavUrl">WebDAV 服务器地址</label>
+                <input id="syncWebdavUrl" type="url" spellcheck="false" placeholder="https://dav.jianguoyun.com/dav/" />
+                <p class="help">填目录即可，扩展会在里面建 <code>mikelingo-sync.json</code>。</p>
+              </div>
+              <div class="grid-2">
+                <div class="field">
+                  <label for="syncWebdavUser">用户名</label>
+                  <input id="syncWebdavUser" type="text" spellcheck="false" autocomplete="username" placeholder="登录邮箱" />
+                </div>
+                <div class="field">
+                  <label for="syncWebdavPass">应用密码</label>
+                  <input id="syncWebdavPass" type="password" autocomplete="new-password" placeholder="留空表示不修改" />
+                  <p class="help" id="syncWebdavPassState">坚果云要用「应用密码」，不是登录密码。</p>
+                </div>
+              </div>
+            </div>
+
+            <div id="syncGist" hidden>
+              <div class="field">
+                <label for="syncGistToken">GitHub Token</label>
+                <input id="syncGistToken" type="password" autocomplete="new-password" placeholder="留空表示不修改" />
+                <p class="help" id="syncGistTokenState">
+                  细粒度 Token 勾选 <code>Gists: Read and write</code>；经典 Token 勾 <code>gist</code> 这一项即可。
+                </p>
+              </div>
+              <div class="field">
+                <label for="syncGistId">Gist ID（可留空）</label>
+                <input id="syncGistId" type="text" spellcheck="false" placeholder="留空则首次同步时自动创建一个私密 Gist" />
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="syncPassphrase">主口令（加密 API Key 用）</label>
+              <input id="syncPassphrase" type="password" autocomplete="new-password" placeholder="留空表示不修改" />
+              <p class="help" id="syncPassphraseState">
+                只留在本机，<strong>不会上传</strong>。两台浏览器必须填同一个口令才解得开对方的密钥；忘了口令就只能重填一次 API Key，我们也解不开。
+              </p>
+            </div>
+
+              </div>
+            </details>
+
+            <label class="check">
+              <input type="checkbox" id="syncIncludeSecrets" />
+              <span>同步 API Key（加密后上传）</span>
+            </label>
+            <label class="check">
+              <input type="checkbox" id="syncAuto" />
+              <span>自动同步（改动后与浏览器启动时）</span>
+            </label>
+
+            <div class="actions-row">
+              <button type="button" class="secondary" id="syncTest">测试连接</button><button type="button" class="primary" id="syncNow">立即同步</button><button type="button" class="secondary" id="syncPull">只下载</button><button type="button" class="secondary" id="syncPush">只上传</button>
+            </div>
+            <p class="test-result" id="syncResult" role="status" aria-live="polite"></p>
+
+            <div class="voice-state" id="syncState">
+              <span class="voice-title">同步状态</span><p class="voice-detail" id="syncStateDetail">还没有同步过。</p>
+            </div>
+          </div>
+
+            </div>
+          </details>
+        </section>
+
+        <section class="card">
           <h2>版本与更新</h2>
           <p class="card-desc">
-            从 GitHub Releases 检查新版本，可以<strong>直接下载并覆盖安装目录</strong>，装完自动重载，
-            不用再手动跑批处理、也不用去扩展页刷新。首次安装时浏览器会让你选一次安装目录并授权写入，
-            之后就记住了。
+            从 GitHub Releases 检查新版本，可以<strong>直接下载并覆盖安装目录</strong>，装完自动重载，不用再手动跑批处理、也不用去扩展页刷新。首次安装时浏览器会让你选一次安装目录并授权写入，之后就记住了。
           </p>
 
           <div class="version-row">
