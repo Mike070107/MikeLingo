@@ -6,7 +6,7 @@ const readline = require('node:readline');
   const from = process.argv[2];
   const to = process.argv[3];
   if (!from || !to) throw new Error('usage: node tools/live-update-validation.cjs <from> <to>');
-  const extensionPath = path.resolve('MikeLingo');
+  const extensionPath = path.resolve(process.env.MIKELINGO_EXTENSION_PATH || 'MikeLingo');
   const browser = await puppeteer.launch({
     headless: false,
     defaultViewport: { width: 1280, height: 900 },
