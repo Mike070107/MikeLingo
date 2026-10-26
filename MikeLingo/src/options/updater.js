@@ -1,5 +1,5 @@
 /**
- * 一键更新：查 GitHub Releases → 下载发布包 → 写回扩展安装目录 → 自动重载。
+ * 一键更新：查 GitHub Releases → 请求 Windows 本机更新助手 → 自动重载。
  *
  * 为什么能写本地文件：扩展没有任意写文件的 API，但设置页是个普通页面，
  * 可以用 File System Access（showDirectoryPicker）让用户**授权一次**安装目录，
@@ -32,6 +32,7 @@ async function apiOverride() {
   }
 }
 const ASSET_RE = /^MikeLingo-v[\d.]+\.zip$/i;
+const NATIVE_HOST = 'com.mikelingo.updater';
 const ALLOWED_PATH_RE = /^(manifest\.json|src\/[A-Za-z0-9_.\-/]+|icons\/[A-Za-z0-9_.-]+)$/;
 const MIRROR_DIRS = ['src', 'icons']; // 这两个目录做镜像：包里没有的旧文件要删掉
 
@@ -189,6 +190,32 @@ export async function downloadPackage(release, onProgress = () => {}, onValidate
   return files;
 }
 
+/**
+ * 交给已注册的 Windows 更新助手。助手自己重新下载并校验包，
+ * 扩展页面不再需要目录权限，也不传递本地路径。
+ */
+export async function installWithNativeHost(release, onProgress = () => {}) {
+  await assertTrustedUrl(release.assetUrl);
+  onProgress('正在下载并安装…');
+  let reply;
+  try {
+    reply = await chrome.runtime.sendNativeMessage(NATIVE_HOST, {
+      action: 'install',
+      version: release.version,
+      assetUrl: release.assetUrl,
+      assetName: release.assetName
+    });
+  } catch (err) {
+    throw new Error(`本机更新助手未连接：${err?.message || err}`);
+  }
+  if (!reply?.ok) throw new Error(reply?.error || '本机更新助手未能完成安装');
+  if (DST.compareVersions(String(reply.version || ''), release.version) !== 0) {
+    throw new Error(`更新助手返回的版本 ${reply?.version || '未知'} 与目标 ${release.version} 不一致`);
+  }
+  onProgress(`已安装 v${reply.version}`);
+  return reply.version;
+}
+
 /* -------------------------------- 写回安装目录 ------------------------------ */
 
 async function ensurePermission(handle) {
@@ -260,8 +287,8 @@ export async function pickInstallDir({ forcePick = false } = {}) {
           await assertInstallDir(saved);
           return saved;
         }
-      } catch (err) {
-        throw new Error('已保存的安装目录不可用。请选择其他安装目录，或下载更新包手动更新。');
+      } catch {
+        // 旧句柄失效或目录已移动：直接继续弹出选择器，不让用户再找另一个按钮。
       }
     }
   }

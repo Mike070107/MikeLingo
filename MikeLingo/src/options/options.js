@@ -949,7 +949,7 @@ async function checkUpdate() {
     $('updateNotes').textContent = release.notes || '（这个版本没有填写更新说明）';
     $('updateLink').href = release.htmlUrl || `https://github.com/${DST.parseRepo($('updateRepo').value)}/releases`;
     $('updateProgress').textContent = '';
-    $('manualUpdateHelp').open = false;
+    $('updateFallback').open = false;
     $('updateBox').hidden = false;
     showUpdateResult('');
   } catch (err) {
@@ -960,23 +960,18 @@ async function checkUpdate() {
   }
 }
 
-async function installUpdate({ forcePick = false } = {}) {
+async function installUpdate() {
   if (!pendingRelease) return;
   const btn = $('installUpdate');
   const progress = $('updateProgress');
   btn.disabled = true;
-  $('pickDir').disabled = true;
+  btn.textContent = '更新中…';
   $('downloadUpdate').disabled = true;
   $('checkUpdate').disabled = true;
   showUpdateResult('');
 
   try {
-    // 先要目录授权再下载：用户拒绝授权时不该白下几十 KB，报错也更贴近他刚做的操作
-    progress.textContent = '等待选择安装目录…';
-    const dir = await updater.pickInstallDir({ forcePick });
-
-    const files = await updater.downloadPackage(pendingRelease, (text) => (progress.textContent = text));
-    await updater.installFiles(dir, files, (text) => (progress.textContent = text));
+    await updater.installWithNativeHost(pendingRelease, (text) => (progress.textContent = text));
 
     progress.textContent = `已安装 v${pendingRelease.version}，正在重新加载扩展…`;
     showUpdateResult(`更新完成，已升级到 v${pendingRelease.version}`, 'ok');
@@ -986,10 +981,10 @@ async function installUpdate({ forcePick = false } = {}) {
     // 用户在文件选择框里点取消不是错误，不该红字吓人
     const aborted = err?.name === 'AbortError';
     progress.textContent = '';
-    $('manualUpdateHelp').open = true;
-    showUpdateResult(aborted ? '已取消目录选择。也可下载更新包，按下方步骤更新。' : `未能更新目录：${err?.message || err}。请使用「下载更新包」，按下方步骤更新。`, aborted ? '' : 'error');
+    $('updateFallback').open = !aborted;
+    showUpdateResult(aborted ? '已取消，没有改动任何文件。再次点击「立即更新」即可重试。' : `直接更新失败：${err?.message || err}。可重试，或使用下方备用方式。`, aborted ? '' : 'error');
+    btn.textContent = '立即更新';
     btn.disabled = false;
-    $('pickDir').disabled = false;
     $('downloadUpdate').disabled = false;
     $('checkUpdate').disabled = false;
   }
@@ -997,10 +992,9 @@ async function installUpdate({ forcePick = false } = {}) {
 
 $('checkUpdate').addEventListener('click', checkUpdate);
 $('installUpdate').addEventListener('click', () => installUpdate());
-$('pickDir').addEventListener('click', () => installUpdate({ forcePick: true }));
 $('downloadUpdate').addEventListener('click', async () => {
   if (!pendingRelease) return;
-  const buttons = ['downloadUpdate', 'installUpdate', 'pickDir', 'checkUpdate'];
+  const buttons = ['downloadUpdate', 'installUpdate', 'checkUpdate'];
   buttons.forEach(id => $(id).disabled = true);
   try {
     await updater.downloadPackage(pendingRelease, text => $('updateProgress').textContent = text, buffer => {
@@ -1011,7 +1005,7 @@ $('downloadUpdate').addEventListener('click', async () => {
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 60000);
     });
-    $('manualUpdateHelp').open = true;
+    $('updateFallback').open = true;
     $('updateProgress').textContent = '更新包已校验并发起下载。请按下方步骤加载，尚未完成安装。';
   } catch (err) {
     showUpdateResult(`下载失败：${err?.message || err}`, 'error');

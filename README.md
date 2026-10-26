@@ -62,7 +62,7 @@ Edge 是 Chromium 内核，MikeLingo 的全部功能在 Edge 上原样可用，*
 | `chrome.runtime.getContexts` | ✅ | Edge 116+，代码里对更低版本已有回落 |
 | `chrome.storage.sync / session` | ✅ | sync 走 Microsoft 账号而不是 Google 账号 |
 | 快捷键 `Alt+T` / `Alt+Shift+V` | ✅ | 未与 Edge 自带快捷键冲突，改绑在 `edge://extensions/shortcuts` |
-| 设置页一键更新（File System Access） | ✅ | `showDirectoryPicker` 可用 |
+| 设置页一键更新（Windows 本机助手） | ✅ | 已注册 `com.mikelingo.updater` |
 | manifest 的 `key`（固定扩展 ID） | ✅ | 派生出的 ID 与 Chrome 一致 |
 
 两点差异，都已在代码和文档里处理：
