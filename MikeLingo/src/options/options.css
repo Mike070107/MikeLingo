@@ -793,6 +793,11 @@ button { min-height:40px; }
 #updateFallback { margin-top:18px; border-top:1px solid var(--border); }
 #updateFallback ol { padding-left:24px; line-height:1.8; color:var(--text-sub); }
 #updateFallback li { margin-bottom:10px; }
+.update-guide { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; list-style:none; margin:18px 0 8px; padding:0; }
+.update-guide li { display:flex; align-items:center; gap:9px; min-height:54px; padding:10px 12px; border:1px solid var(--border); border-radius:12px; background:var(--surface); color:var(--text-sub); line-height:1.35; }
+.update-guide span { display:grid; place-items:center; width:24px; height:24px; flex:none; border-radius:50%; background:#e8edf4; color:#223047; font-size:12px; font-weight:700; }
+.update-guide strong { color:var(--text); font-size:13px; font-weight:600; }
+.update-promise { color:var(--ok); font-size:13px; font-weight:550; }
 .update-primary-actions { margin-top:18px; }
 .update-primary-actions #installUpdate { min-width:168px; min-height:48px; }
 .update-direct-hint { margin-top:10px; }
@@ -807,6 +812,7 @@ button::before { flex:none; }
 #installUpdate::before { content:""; width:16px; height:16px; display:inline-block; background:currentColor; -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M20 12a8 8 0 1 1-2.34-5.66M20 4v6h-6'/%3E%3C/svg%3E") center/contain no-repeat; mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M20 12a8 8 0 1 1-2.34-5.66M20 4v6h-6'/%3E%3C/svg%3E") center/contain no-repeat; }
 #addProvider,.p-save,.p-test,#saveBtn,#syncTest,#checkUpdate,#installUpdate,#downloadUpdate,#backupExport,#syncPull { display:inline-flex; align-items:center; justify-content:center; gap:7px; }
 @media(max-width:720px) {
+ .update-guide { grid-template-columns:1fr; }
  .page { padding:24px 16px 130px; display:block; }
  .page-head { margin-bottom:20px; }
  .settings-nav { position:static; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:4px; margin-bottom:22px; }

@@ -26,4 +26,7 @@ const assert = require('node:assert/strict');
   assert.match(mainActions, /id="installUpdate"/);
   assert.doesNotMatch(mainActions, /id="downloadUpdate"|id="pickDir"/);
   console.log('PASS 正常更新只暴露一个「立即更新」主操作');
+  assert.match(html, /检查更新[^]*立即更新[^]*等待页面自动刷新/);
+  assert.match(html, /不用下载、解压或选择安装目录/);
+  console.log('PASS 用户点击前就能看到完整三步操作与免手工说明');
 })().catch(err => { console.error(err.message); process.exitCode = 1; });

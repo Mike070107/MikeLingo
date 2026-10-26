@@ -486,6 +486,13 @@
             <span class="version-checked" id="updateCheckedAt"></span>
           </div>
 
+          <ol class="update-guide" aria-label="更新操作步骤">
+            <li><span>1</span><strong>点「检查更新」</strong></li>
+            <li><span>2</span><strong>有新版本时点「立即更新」</strong></li>
+            <li><span>3</span><strong>等待页面自动刷新</strong></li>
+          </ol>
+          <p class="update-promise">不用下载、解压或选择安装目录。</p>
+
           <details class="adv"><summary>更新源</summary><div class="field">
             <label for="updateRepo">更新源（GitHub 仓库）</label>
             <input id="updateRepo" type="text" spellcheck="false" placeholder="用户名/仓库名" />
@@ -506,7 +513,7 @@
             <div class="actions-row update-primary-actions">
               <button type="button" class="primary" id="installUpdate">立即更新</button>
             </div>
-            <p class="help update-direct-hint">更新助手会在后台完成下载和安装，不需要选择目录。</p>
+            <p class="help update-direct-hint">点击后不要关闭浏览器，安装完成会自动刷新。</p>
             <p class="help" id="updateProgress" role="status" aria-live="polite"></p>
             <details class="adv update-fallback" id="updateFallback"><summary>更新遇到问题？</summary><div class="adv-body"><div class="actions-row"><button type="button" class="ghost" id="downloadUpdate">下载备用更新包</button></div><p class="help">正常情况下只需点「立即更新」；备用包仅供故障排查。</p></div></details>
           </div>
