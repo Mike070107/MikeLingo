@@ -88,13 +88,13 @@ function renderModes() {
 function renderToggle() {
   el.toggle.disabled = !contentAvailable;
   el.toggle.classList.toggle('active', pageState.active);
-  el.toggleLabel.textContent = pageState.active ? '还原原文' : '对照翻译此页面';
+  el.toggleLabel.textContent = pageState.active ? '还原原文' : '翻译当前页面';
   if (!contentAvailable) {
     el.progress.textContent = '当前页面不支持翻译（浏览器内置页面或应用商店）';
   } else if (pageState.active && pageState.total) {
     el.progress.textContent = `已翻译 ${pageState.done}/${pageState.total} 个段落`;
   } else {
-    el.progress.textContent = '快捷键 Alt+T · 右键菜单也可触发';
+    el.progress.textContent = 'Alt + T';
   }
 }
 
@@ -111,7 +111,9 @@ function renderProviders() {
   for (const provider of settings.providers) {
     const option = document.createElement('option');
     option.value = provider.id;
-    option.textContent = `${provider.name} · ${provider.model}`;
+    option.textContent = DST.isDeepLProvider(provider)
+      ? `${provider.name} · DeepL ${provider.deeplPlan === 'pro' ? 'Pro' : 'Free'}`
+      : `${provider.name} · ${provider.model}`;
     el.provider.appendChild(option);
   }
   el.provider.value = settings.activeProviderId;

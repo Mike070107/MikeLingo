@@ -711,3 +711,26 @@ body {
     transition: none !important;
   }
 }
+/* Compact neutral translation companion */
+:root { --brand:#334155; --brand-dark:#1e293b; --text:#1f2937; --text-sub:#7b8491; --border:#e5e7eb; --surface-sub:#f3f5f7; }
+body { width:380px; max-width:100vw; background:#fafbfc; }
+.head { padding:18px 20px 14px; border:0; }
+.logo { background:#334155; border-radius:11px; width:36px; height:36px; }
+.brand-name { font-size:17px; letter-spacing:-.5px; }
+.body { padding:8px 20px 14px; gap:14px; }
+#toggleBtn { display:flex; align-items:center; justify-content:center; gap:10px; min-height:48px; border-radius:14px; }
+#toggleBtn svg { width:21px; height:21px; }
+.hint { font-size:11px; letter-spacing:.5px; }
+.brand-sub,.hint,.quick-count,.foot-label,.wide-meta { color:#929aa5; }
+.label { color:#596270; font-weight:600; }
+.quick { padding:14px; border-radius:17px; background:white; box-shadow:0 4px 18px #0f172a08; }
+#quickInput { border:0; background:#f5f6f8; min-height:88px; padding:12px; }
+.quick-lang select { border:0; background:#eef1f4; color:#475569; }
+.segmented { padding:5px; background:#eef1f4; border:0; border-radius:13px; }
+.segmented button { display:flex; align-items:center; justify-content:center; gap:6px; min-height:39px; border-radius:9px; }
+.segmented svg { width:18px; height:18px; }
+.switch-text em { display:none; }
+.switch { min-height:34px; }
+.foot { padding:12px 20px; }
+.icon-btn { width:40px; height:40px; }
+.sr-only { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }

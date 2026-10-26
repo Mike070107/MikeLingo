@@ -18,16 +18,13 @@
         </span>
         <div>
           <h1>MikeLingo</h1>
-          <p class="sub">配置 API 与翻译显示方式，所有设置立即生效，无需重装扩展。</p>
+          <p class="sub">让语言，少一点距离。</p>
         </div>
       </header>
 
-      <main>
-        <section class="card">
-          <h2>翻译接口</h2>
-          <p class="card-desc">
-            可以配置多个接口，<strong>勾选哪一个就用哪一个</strong>——同一时刻只有一个生效，切换后立即生效。兼容 OpenAI 协议的服务均可（路径自动拼接 <code>/chat/completions</code>）。密钥仅保存在本机浏览器（chrome.storage.local），不会同步到云端，也不会出现在页面或日志中。可前往 <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noreferrer noopener">DeepSeek 开放平台</a> 创建密钥。
-          </p>
+      <nav class="settings-nav" aria-label="设置分类"><a href="#settings-0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h16M8 4v8m8-8v8M7 12v4a5 5 0 0 0 10 0v-4M12 21v-2"/></svg><span>翻译服务</span></a><a href="#settings-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16M7 3v4M4 12h7m-4 0v8m7 0 3-8 3 8m-5-3h4"/></svg><span>翻译偏好</span></a><a href="#settings-2"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M12 4v16M6 8h3m-3 4h3m6-4h3m-3 4h3"/></svg><span>阅读外观</span></a><a href="#settings-3"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 3 14 9-7 1-3 7Z"/></svg><span>划词翻译</span></a><a href="#settings-4"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4Zm4 3a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/></svg><span>发音与生词</span></a><a href="#settings-5"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a18 18 0 0 1 0 18 18 18 0 0 1 0-18"/></svg><span>网站规则</span></a><a href="#settings-6"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 16a5 5 0 0 1 0-10 7 7 0 0 1 13-1 5 5 0 0 1 1 10M12 12v9m-3-3 3 3 3-3"/></svg><span>备份同步</span></a><a href="#settings-7"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 8a9 9 0 1 0 1 8M20 3v5h-5"/></svg><span>版本更新</span></a></nav><main>
+        <section class="card" id="settings-0"><h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h16M8 4v8m8-8v8M7 12v4a5 5 0 0 0 10 0v-4M12 21v-2"/></svg>翻译接口</h2>
+          <p class="card-desc">选服务商 → 填密钥 → 开始翻译。密钥保存在本机；启用密钥同步时加密上传。</p>
 
           <ul class="provider-list" id="providerList"></ul>
           <p class="error" id="providersError" hidden></p>
@@ -62,6 +59,14 @@
               填完当场能存；名称／地址／温度／超时按服务商预设都已填好，绝大多数人不会动，收进「更多设置」。
             -->
             <div class="provider-body" hidden>
+              <div class="field p-deepl-plan-field" hidden>
+                <label class="p-deepl-plan-label">DeepL 套餐</label>
+                <select class="p-deepl-plan">
+                  <option value="free">API Free（api-free.deepl.com）</option>
+                  <option value="pro">API Pro（api.deepl.com）</option>
+                </select>
+                <p class="help">Free 和 Pro 使用不同的官方地址，请与 DeepL 账户套餐保持一致。源语言保持自动识别。</p>
+              </div>
               <div class="field">
                 <label class="p-model-label">模型</label>
                 <!--
@@ -71,10 +76,9 @@
                 -->
                 <select class="p-models"></select>
                 <input class="p-model" spellcheck="false" placeholder="deepseek-chat" />
-                <p class="help p-modelhelp">下拉里是这家服务商的常用模型；要用别的就选「自定义…」再手填。</p>
+                <p class="help p-modelhelp">也可选择「自定义」输入模型名。</p>
                 <p class="help mt-note p-mtnote" hidden>
-                  翻译专用模型：会忽略自定义提示词，只按目标语言直译；扩展已自动改为逐条发送并传 <code>translation_options</code>。
-                </p>
+                  翻译专用，不支持词典详解。</p>
                 <p class="error p-model-error" hidden></p>
               </div>
 
@@ -86,12 +90,13 @@
                   <button type="button" class="primary p-save">保存</button>
                 </div>
                 <p class="help p-keyhelp"></p>
+                <p class="help p-deepl-note" hidden>DeepL API Key 通常以 <code>:fx</code> 结尾（Free）；密钥仅保存在本机，界面只回显脱敏预览。</p>
                 <p class="error p-key-error" hidden></p>
                 <p class="test-result p-saveresult"></p>
               </div>
 
               <details class="adv p-adv">
-                <summary>更多设置（名称、API 地址、温度、超时、测试连接）</summary>
+                <summary>连接设置</summary>
                 <div class="adv-body">
                   <div class="field">
                     <label class="p-name-label">名称</label>
@@ -129,8 +134,7 @@
           </li>
         </template>
 
-        <section class="card">
-          <h2>翻译行为</h2>
+        <section class="card" id="settings-1"><h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16M7 3v4M4 12h7m-4 0v8m7 0 3-8 3 8m-5-3h4"/></svg>翻译行为</h2>
           <div class="grid-2">
             <div class="field">
               <label for="targetLang">目标语言</label>
@@ -143,7 +147,7 @@
                 <option value="한국어"></option>
               </datalist>
             </div>
-            <div class="field">
+</div><details class="adv"><summary>性能与请求限制</summary><div class="adv-body"><div class="grid-2">            <div class="field">
               <label for="concurrency">并发请求数</label>
               <input id="concurrency" type="number" min="1" max="10" step="1" />
               <p class="help">过高易触发限流，建议 2–4</p>
@@ -176,7 +180,7 @@
             </div>
           </div>
 
-          <label class="check">
+</div></details>          <label class="check">
             <input type="checkbox" id="onlyTranslateForeign" />
             <span>跳过已是中文的段落（推荐，可节省额度）</span>
           </label>
@@ -197,8 +201,7 @@
           </div>
         </section>
 
-        <section class="card">
-          <h2>显示方式</h2>
+        <section class="card" id="settings-2"><h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M12 4v16M6 8h3m-3 4h3m6-4h3m-3 4h3"/></svg>显示方式</h2>
           <div class="grid-2">
             <div class="field">
               <label for="displayMode">对照模式</label>
@@ -245,8 +248,7 @@
           </div>
         </section>
 
-        <section class="card">
-          <h2>划词翻译</h2>
+        <section class="card" id="settings-3"><h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 3 14 9-7 1-3 7Z"/></svg>划词翻译</h2>
           <label class="check">
             <input type="checkbox" id="selectionEnabled" />
             <span>启用划词翻译</span>
@@ -266,9 +268,7 @@
               <option value="manual">手动：点「详细解释」才查</option>
               <option value="off">关闭：只给译文</option>
             </select>
-            <p class="help">
-              详解会<strong>另外发一次请求</strong>（约多花一条翻译的额度），给出分词性的释义、双语例句、用法辨析和相关词，专有名词会说明是什么、在哪、为什么有名。自动模式只对 5 个英文单词 / 12 个汉字以内的短内容发起，长句子仍需手动点「详细解释」。同一个词的详解会缓存在本机，再划一次不重复计费。
-            </p>
+            <p class="help">自动查询短词释义与例句，会额外使用模型额度。</p>
           </div>
           <div class="grid-2" id="explainProviderField">
             <div class="field">
@@ -284,19 +284,12 @@
               <p class="help" id="explainModelHint"></p>
             </div>
           </div>
-          <p class="help">
-            <strong>翻译和详解可以用两个不同的模型。</strong>最常见的搭配：翻译用
-            <code>qwen-mt-flash</code> 这类<strong>翻译专用模型</strong>（便宜、专精），详解用通用对话模型（<code>qwen-plus</code>、<code>deepseek-chat</code> 等）。两者服务商相同时，接口选「跟随翻译接口」、这里只填模型名就行，地址和密钥都不用再配一遍；不同服务商才需要在上面「翻译接口」里另加一个接口，再到左边选它。<strong>翻译专用模型做不了详解</strong>——它们不看提示词，只会把原文再翻一遍。
-          </p>
+          <p class="help">使用 qwen-mt 翻译时，详解请选择 qwen-plus 等通用模型。</p>
           <p class="field-error" id="explainProviderWarn" hidden></p>
         </section>
 
-        <section class="card">
-          <h2>音标、发音与生词本</h2>
-          <p class="card-desc">
-            划词卡片和快速翻译里，选中<strong>单个英文单词</strong>时会显示音标和真人发音；短语和句子没有音标，朗读会用系统语音合成。音标来自免费的
-            <a href="https://dictionaryapi.dev" target="_blank" rel="noreferrer noopener">dictionaryapi.dev</a>，不需要密钥，查询结果缓存在本机，查不到不影响翻译。
-          </p>
+        <section class="card" id="settings-4"><h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4Zm4 3a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/></svg>音标、发音与生词本</h2>
+          <p class="card-desc">听发音、收生词，留住每一次新发现。</p>
 
           <label class="check">
             <input type="checkbox" id="dictEnabled" />
@@ -332,9 +325,7 @@
               <option value="dict">只用 dictionaryapi.dev（国际，音频服务常不稳定）</option>
               <option value="none">不联网，只用系统语音合成</option>
             </select>
-            <p class="help">
-              朗读需要联网：<code>dict.youdao.com</code> 是词典录音，只认单词和短词组，句子会失败；<code>fanyi.baidu.com</code> 是语音合成，整句、中文、日文都能读，1000 字以内。两者国内外都能直连，dictionaryapi.dev 的音频节点则经常返回 502。全都拿不到时改用系统语音合成——那条路不联网，但要求电脑装了对应语言的语音包。<strong>朗读的内容会发给对应服务商</strong>；介意就选「不联网」。
-            </p>
+            <p class="help">在线朗读会发送文字给音源服务商；选择「不联网」可仅用系统语音。</p>
           </div>
 
           <div class="voice-state" id="voiceState">
@@ -349,8 +340,7 @@
           </div>
         </section>
 
-        <section class="card">
-          <h2>自动翻译网站</h2>
+        <section class="card" id="settings-5"><h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a18 18 0 0 1 0 18 18 18 0 0 1 0-18"/></svg>自动翻译网站</h2>
           <p class="card-desc">打开列表中的网站时自动开启对照翻译。支持 <code>example.com</code> 与 <code>*.example.com</code>。</p>
           <div class="field">
             <label for="siteInput">添加网站</label>
@@ -364,8 +354,7 @@
           <p class="help" id="siteEmpty">暂无自动翻译网站，可在插件弹窗里一键添加当前站点。</p>
         </section>
 
-        <section class="card">
-          <h2>备份与同步</h2>
+        <section class="card" id="settings-6"><h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 16a5 5 0 0 1 0-10 7 7 0 0 1 13-1 5 5 0 0 1 1 10M12 12v9m-3-3 3 3 3-3"/></svg>备份与同步</h2>
           <!--
             换行位置有讲究：中文和标签／英文之间的换行会被渲染成一个空格（CJK 之间才会被吃掉），
             所以只在英文单词后面断行，否则页面上会冒出"GitHub， Chrome"这种多余空格。
@@ -488,11 +477,8 @@
           </details>
         </section>
 
-        <section class="card">
-          <h2>版本与更新</h2>
-          <p class="card-desc">
-            从 GitHub Releases 检查新版本，可以<strong>直接下载并覆盖安装目录</strong>，装完自动重载，不用再手动跑批处理、也不用去扩展页刷新。首次安装时浏览器会让你选一次安装目录并授权写入，之后就记住了。
-          </p>
+        <section class="card" id="settings-7"><h2><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 8a9 9 0 1 0 1 8M20 3v5h-5"/></svg>版本与更新</h2>
+          <p class="card-desc">下载更新包，或授权普通文件夹直接更新。</p>
 
           <div class="version-row">
             <span class="version-label">当前版本</span>
@@ -500,11 +486,11 @@
             <span class="version-checked" id="updateCheckedAt"></span>
           </div>
 
-          <div class="field">
+          <details class="adv"><summary>更新源</summary><div class="field">
             <label for="updateRepo">更新源（GitHub 仓库）</label>
             <input id="updateRepo" type="text" spellcheck="false" placeholder="用户名/仓库名" />
             <p class="help">填 <code>用户名/仓库名</code>，直接粘仓库网址也认。留空则不检查更新。</p>
-          </div>
+          </div></details>
 
           <div class="actions-row">
             <button type="button" class="secondary" id="checkUpdate">检查更新</button>
@@ -518,10 +504,10 @@
             </div>
             <pre class="update-notes" id="updateNotes"></pre>
             <div class="actions-row">
-              <button type="button" class="primary" id="installUpdate">下载并安装</button>
+              <button type="button" class="primary" id="downloadUpdate">下载更新包</button><button type="button" class="secondary" id="installUpdate">更新已授权目录</button>
               <button type="button" class="secondary" id="pickDir">重新选择安装目录</button>
             </div>
-            <p class="help" id="updateProgress" role="status" aria-live="polite"></p>
+            <details class="adv" id="manualUpdateHelp"><summary>如何完成更新</summary><ol><li>解压下载的 ZIP，找到 manifest.json 所在文件夹。</li><li>普通目录：将文件覆盖原来的 MikeLingo 文件夹，然后到扩展管理页点「重新加载」。</li><li>若浏览器提示系统文件夹：停止选择该目录。将更新包解压到你自己的普通文件夹（如 D:\Extensions\MikeLingo），在扩展管理页开启开发者模式，点「加载已解压的扩展程序」并选择它。</li></ol><p class="help">请勿点「移除」旧扩展。新包保持同一扩展 ID；加载后核对版本、设置和生词本。</p></details><p class="help" id="updateProgress" role="status" aria-live="polite"></p>
           </div>
         </section>
       </main>

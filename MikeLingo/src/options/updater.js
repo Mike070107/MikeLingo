@@ -93,6 +93,7 @@ export async function fetchLatestRelease(repo) {
   let res;
   try {
     res = await fetch(`${base}/repos/${slug}/releases/latest`, {
+      signal: AbortSignal.timeout(30000),
       headers: { Accept: 'application/vnd.github+json' },
       cache: 'no-store'
     });
@@ -144,11 +145,11 @@ async function assertTrustedUrl(url) {
 }
 
 /** 下载并解包，顺带把包内容校验一遍。onProgress(阶段文案) 用于界面反馈 */
-export async function downloadPackage(release, onProgress = () => {}) {
+export async function downloadPackage(release, onProgress = () => {}, onValidatedArchive = () => {}) {
   await assertTrustedUrl(release.assetUrl);
 
   onProgress('正在下载发布包…');
-  const res = await fetch(release.assetUrl, { cache: 'no-store' });
+  const res = await fetch(release.assetUrl, { cache: 'no-store', signal: AbortSignal.timeout(60000) });
   if (!res.ok) throw new Error(`下载失败：HTTP ${res.status}`);
   const buffer = await res.arrayBuffer();
 
@@ -184,6 +185,7 @@ export async function downloadPackage(release, onProgress = () => {}) {
     throw new Error(`发布包版本 ${manifest.version} 不比当前的 ${current.version} 新，已中止`);
   }
 
+  await onValidatedArchive(buffer);
   return files;
 }
 
@@ -200,7 +202,8 @@ async function readInstallManifest(dir) {
   try {
     const file = await (await dir.getFileHandle('manifest.json')).getFile();
     const manifest = JSON.parse(await file.text());
-    return manifest?.name === chrome.runtime.getManifest().name ? manifest : null;
+    const current = chrome.runtime.getManifest();
+    return manifest?.name === current.name && (!current.key || manifest.key === current.key) ? manifest : null;
   } catch {
     return null;
   }
@@ -251,9 +254,15 @@ export async function pickInstallDir({ forcePick = false } = {}) {
   }
   if (!forcePick) {
     const saved = await readHandle();
-    if (saved && (await ensurePermission(saved))) {
-      await assertInstallDir(saved);
-      return saved;
+    if (saved) {
+      try {
+        if (await ensurePermission(saved)) {
+          await assertInstallDir(saved);
+          return saved;
+        }
+      } catch (err) {
+        throw new Error('已保存的安装目录不可用。请选择其他安装目录，或下载更新包手动更新。');
+      }
     }
   }
   const picked = await window.showDirectoryPicker({ id: 'mikelingo-install', mode: 'readwrite' });
@@ -312,6 +321,7 @@ async function removeStale(dir, files, onProgress) {
  * 不会出现"版本号说是新的、代码还是旧的"这种最难查的状态。
  */
 export async function installFiles(dir, files, onProgress = () => {}) {
+  await assertInstallDir(dir);
   const entries = [...files.entries()].filter(([name]) => name !== 'manifest.json');
   let done = 0;
   for (const [name, bytes] of entries) {

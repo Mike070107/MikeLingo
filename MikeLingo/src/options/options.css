@@ -438,8 +438,8 @@ button:focus-visible {
 }
 
 .provider.active {
-  border-color: rgba(37, 99, 235, 0.55);
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);
+  border-color: rgba(23, 107, 89, 0.4);
+  box-shadow: 0 0 0 3px rgba(23, 107, 89, 0.05);
 }
 
 .provider-head {
@@ -491,7 +491,7 @@ button:focus-visible {
 .badge {
   padding: 2px 8px;
   border-radius: 999px;
-  background: rgba(37, 99, 235, 0.1);
+  background: rgba(23, 107, 89, 0.1);
   color: var(--brand);
   font-size: 11.5px;
   font-weight: 600;
@@ -757,4 +757,60 @@ button:focus-visible {
   * {
     transition: none !important;
   }
+}
+/* Quiet neutral workspace: icons lead, copy supports. */
+:root { --brand:#334155; --brand-dark:#1e293b; --text:#1f2937; --text-sub:#7b8491; --border:#e5e7eb; --bg:#f7f8fa; --font:"Segoe UI","Microsoft YaHei","PingFang SC",sans-serif; }
+.page { max-width:1120px; padding:42px 32px 112px; display:grid; grid-template-columns:196px minmax(0,1fr); gap:28px 40px; }
+.page-head { grid-column:1/-1; margin:0 0 8px; }
+.page-head h1 { font-size:26px; letter-spacing:-1px; }
+.logo { background:#334155; border-radius:14px; width:48px; height:48px; }
+.settings-nav { display:flex; flex-direction:column; gap:6px; align-self:start; position:sticky; top:24px; }
+.settings-nav a { display:flex; align-items:center; gap:12px; padding:12px 16px; color:var(--text-sub); text-decoration:none; border-radius:12px; font-weight:500; }
+.settings-nav a:hover { background:#eef1f5; color:#475569; }
+.settings-nav a[aria-current] { color:#1e293b; background:#e9edf2; }
+.settings-nav svg,.card h2 svg { width:21px; height:21px; flex:none; }
+.card { border-radius:22px; padding:30px; margin:0; box-shadow:0 5px 24px #203d3504; }
+.card h2 { display:flex; gap:12px; align-items:center; font-size:22px; margin-bottom:18px; letter-spacing:-.5px; }
+.card h2 svg { color:#64748b; }
+.card-desc { line-height:1.7; margin-bottom:24px; color:#8a93a0; font-size:14px; }
+main { min-width:0; }
+.provider { border-radius:14px; overflow:hidden; }
+.provider.active { border-color:#cbd5e1; box-shadow:0 0 0 3px rgba(51,65,85,.04); }
+.badge { background:#eef1f4; color:#475569; font-weight:550; }
+.provider-head { flex-wrap:wrap; gap:10px; }
+.provider-pick { flex:1; min-width:120px; }
+.provider-body { background:#fafbfc; }
+input,select,textarea { max-width:100%; min-width:0; }
+input:not([type=checkbox]):not([type=radio]),select { min-height:44px; border-radius:10px; }
+button { min-height:40px; }
+.adv { border-radius:12px; margin:18px 0; }
+.adv summary { padding:12px 0; color:var(--text-sub); }
+.adv-body { padding-top:14px; }
+.grid-2 { min-width:0; }
+.check { padding:9px 0; }
+.save-bar { z-index:10; padding:16px max(24px,calc((100vw - 1056px)/2)); }
+.save-bar .primary { border-radius:12px; min-width:132px; }
+#manualUpdateHelp ol { padding-left:24px; line-height:1.9; }
+#manualUpdateHelp li { margin-bottom:12px; }
+:focus-visible { outline:2px solid var(--brand); outline-offset:3px; }
+
+button { font-weight:550; }
+button::before { flex:none; }
+#addProvider::before { content:""; width:15px; height:15px; display:inline-block; background:currentColor; -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M12 5v14M5 12h14'/%3E%3C/svg%3E") center/contain no-repeat; mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M12 5v14M5 12h14'/%3E%3C/svg%3E") center/contain no-repeat; }
+.p-save::before,#saveBtn::before { content:""; width:15px; height:15px; display:inline-block; background:currentColor; -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='m5 12 4 4L19 6'/%3E%3C/svg%3E") center/contain no-repeat; mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='m5 12 4 4L19 6'/%3E%3C/svg%3E") center/contain no-repeat; }
+.p-test::before,#syncTest::before,#checkUpdate::before { content:""; width:15px; height:15px; display:inline-block; background:currentColor; -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Cpath d='M20 12a8 8 0 1 1-2.34-5.66M20 4v6h-6'/%3E%3C/svg%3E") center/contain no-repeat; mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Cpath d='M20 12a8 8 0 1 1-2.34-5.66M20 4v6h-6'/%3E%3C/svg%3E") center/contain no-repeat; }
+#downloadUpdate::before,#backupExport::before,#syncPull::before { content:""; width:15px; height:15px; display:inline-block; background:currentColor; -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Cpath d='M12 3v12m-5-5 5 5 5-5M5 21h14'/%3E%3C/svg%3E") center/contain no-repeat; mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2'%3E%3Cpath d='M12 3v12m-5-5 5 5 5-5M5 21h14'/%3E%3C/svg%3E") center/contain no-repeat; }
+#addProvider,.p-save,.p-test,#saveBtn,#syncTest,#checkUpdate,#downloadUpdate,#backupExport,#syncPull { display:inline-flex; align-items:center; justify-content:center; gap:7px; }
+@media(max-width:720px) {
+ .page { padding:24px 16px 130px; display:block; }
+ .page-head { margin-bottom:20px; }
+ .settings-nav { position:static; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:4px; margin-bottom:22px; }
+ .settings-nav a { flex-direction:column; gap:5px; padding:10px 2px; font-size:12px; }
+ .card { padding:22px 18px; border-radius:18px; }
+ .grid-2 { grid-template-columns:1fr; }
+ .input-row,.actions-row { flex-wrap:wrap; }
+ .input-row input { flex:1 1 140px; width:100px; }
+ .save-bar { padding:12px 16px max(12px,env(safe-area-inset-bottom)); }
+ .provider-head { align-items:center; }
+ .p-meta { overflow-wrap:anywhere; }
 }

@@ -4,6 +4,18 @@ import * as updater from './updater.js';
 const DST = globalThis.DST;
 const $ = (id) => document.getElementById(id);
 
+function showSection(id) {
+  const sections = [...document.querySelectorAll('main > .card')];
+  if (!sections.some(section => section.id === id)) id = 'settings-0';
+  sections.forEach(section => section.hidden = section.id !== id);
+  document.querySelectorAll('.settings-nav a').forEach(link => {
+    if (link.hash === `#${id}`) link.setAttribute('aria-current', 'page');
+    else link.removeAttribute('aria-current');
+  });
+}
+window.addEventListener('hashchange', () => showSection(location.hash.slice(1)));
+showSection(location.hash.slice(1));
+
 const CLOSE_ICON =
   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
 
@@ -23,6 +35,8 @@ const DASHSCOPE_MODELS = [
 
 /** 常见服务商预设：新增接口时直接填好地址和推荐模型，省得用户去翻文档 */
 const PRESETS = [
+  { key: 'deepl-free', name: 'DeepL API Free', type: 'deepl', deeplPlan: 'free', baseUrl: 'https://api-free.deepl.com', model: '', models: [] },
+  { key: 'deepl-pro', name: 'DeepL API Pro', type: 'deepl', deeplPlan: 'pro', baseUrl: 'https://api.deepl.com', model: '', models: [] },
   {
     key: 'deepseek',
     name: 'DeepSeek',
@@ -253,7 +267,9 @@ function renderPresets() {
 
 function updateProviderHead(li, provider) {
   li.querySelector('.p-name-text').textContent = provider.name;
-  li.querySelector('.p-meta').textContent = `${provider.model} · ${provider.baseUrl}`;
+  li.querySelector('.p-meta').textContent = DST.isDeepLProvider(provider)
+    ? `DeepL ${provider.deeplPlan === 'pro' ? 'Pro' : 'Free'} · ${provider.baseUrl}`
+    : `${provider.model} · ${provider.baseUrl}`;
   const isActive = provider.id === activeProviderId;
   li.classList.toggle('active', isActive);
   li.querySelector('.p-badge').hidden = !isActive;
@@ -302,6 +318,28 @@ function renderProviders() {
     const baseUrlInput = bindField(li, provider, 'baseUrl');
     bindField(li, provider, 'temperature');
 
+    const deeplPlanField = li.querySelector('.p-deepl-plan-field');
+    const deeplPlanSelect = li.querySelector('.p-deepl-plan');
+    const modelField = modelInput.closest('.field');
+    const syncProviderType = () => {
+      const isDeepL = DST.isDeepLProvider(provider);
+      deeplPlanField.hidden = !isDeepL;
+      modelField.hidden = isDeepL;
+      li.querySelector('.p-deepl-note').hidden = !isDeepL;
+      li.querySelector('.p-key').placeholder = isDeepL ? 'DeepL API Key' : 'sk-...';
+      if (isDeepL) {
+        deeplPlanSelect.value = provider.deeplPlan === 'pro' ? 'pro' : 'free';
+        provider.model = '';
+      }
+    };
+    deeplPlanSelect.addEventListener('change', () => {
+      provider.deeplPlan = deeplPlanSelect.value;
+      provider.baseUrl = provider.deeplPlan === 'pro' ? 'https://api.deepl.com' : 'https://api-free.deepl.com';
+      baseUrlInput.value = provider.baseUrl;
+      updateProviderHead(li, provider);
+      syncExplainProviderWarn();
+    });
+
     // 候选模型跟着这一行的 API 地址走
     const modelOptions = li.querySelector('.p-models');
     const syncModelOptions = () => syncModelPicker(modelOptions, modelInput, baseUrlInput.value);
@@ -322,7 +360,7 @@ function renderProviders() {
     const syncMtNote = () => {
       const isMt = DST.isTranslationOnlyModel(modelInput.value);
       mtNote.hidden = !isMt;
-      temperatureField.hidden = isMt; // 该类模型不接受 temperature，留着会误导
+      temperatureField.hidden = isMt || DST.isDeepLProvider(provider); // 翻译专用接口不接受 temperature
     };
     modelInput.addEventListener('input', syncMtNote);
     // 改了模型名可能让详解那条路失效，提示要跟着变
@@ -331,6 +369,7 @@ function renderProviders() {
       syncExplainProviderWarn();
     });
     syncMtNote();
+    syncProviderType();
 
     const body = li.querySelector('.provider-body');
     const toggle = li.querySelector('.p-toggle');
@@ -504,9 +543,12 @@ function syncExplainProviderWarn() {
       : '';
   }
 
+  const isDeepL = DST.isDeepLProvider(provider);
   const isMt = DST.isTranslationOnlyModel(model);
-  warn.hidden = !isMt;
-  if (isMt) {
+  warn.hidden = !isMt && !isDeepL;
+  if (isDeepL) {
+    warn.textContent = 'DeepL Translate 只负责翻译，不支持词典详解。请在「详解使用的接口」选择 qwen-plus、DeepSeek 等通用模型接口。';
+  } else if (isMt) {
     warn.textContent = `详解目前会用到翻译专用模型 ${model}，它做不了详解。请在「详解使用的模型」里填一个通用对话模型（如 qwen-plus、deepseek-chat）。`;
   }
 }
@@ -521,7 +563,7 @@ function addProvider() {
   const name = providers.some((p) => p.name === preset.name) ? `${preset.name} ${n - 1}` : preset.name;
   providers.push(
     DST.normalizeProvider(
-      { id, name, baseUrl: preset.baseUrl, model: preset.model || DST.DEFAULT_PROVIDER.model },
+      { id, name, type: preset.type, deeplPlan: preset.deeplPlan, baseUrl: preset.baseUrl, model: preset.model },
       providers.length,
       used
     )
@@ -614,8 +656,13 @@ function validateProvider(li, provider) {
     setFieldError(li, 'baseUrl', '');
   }
 
-  if (!String(provider.model || '').trim()) ok = setFieldError(li, 'model', '模型名称不能为空') && ok;
+  if (!DST.isDeepLProvider(provider) && !String(provider.model || '').trim()) ok = setFieldError(li, 'model', '模型名称不能为空') && ok;
   else setFieldError(li, 'model', '');
+
+  if (DST.isDeepLProvider(provider)) {
+    const expected = provider.deeplPlan === 'pro' ? 'https://api.deepl.com' : 'https://api-free.deepl.com';
+    if (baseUrl !== expected) ok = setFieldError(li, 'baseUrl', `DeepL ${provider.deeplPlan === 'pro' ? 'Pro' : 'Free'} 地址应为 ${expected}`) && ok;
+  }
 
   const key = pendingKeys[provider.id] || '';
   if (key && /\s/.test(key)) {
@@ -805,6 +852,15 @@ async function saveAll() {
   const providersOk = validateAllProviders();
   const { valid, patch } = collectForm();
   if (!providersOk || !valid) {
+    const error = document.querySelector('.error:not([hidden]), .field-error:not([hidden]), [aria-invalid="true"]');
+    if (error) {
+      const section = error.closest('main > .card');
+      if (section) { location.hash = section.id; showSection(section.id); }
+      for (let parent = error.parentElement; parent; parent = parent.parentElement) {
+        if (parent.tagName === 'DETAILS') parent.open = true;
+      }
+      error.scrollIntoView({ block: 'center' });
+    }
     showSaveStatus('请修正标红的字段后再保存', true);
     return { ok: false, error: '请修正标红的字段后再保存' };
   }
@@ -893,6 +949,7 @@ async function checkUpdate() {
     $('updateNotes').textContent = release.notes || '（这个版本没有填写更新说明）';
     $('updateLink').href = release.htmlUrl || `https://github.com/${DST.parseRepo($('updateRepo').value)}/releases`;
     $('updateProgress').textContent = '';
+    $('manualUpdateHelp').open = false;
     $('updateBox').hidden = false;
     showUpdateResult('');
   } catch (err) {
@@ -909,6 +966,8 @@ async function installUpdate({ forcePick = false } = {}) {
   const progress = $('updateProgress');
   btn.disabled = true;
   $('pickDir').disabled = true;
+  $('downloadUpdate').disabled = true;
+  $('checkUpdate').disabled = true;
   showUpdateResult('');
 
   try {
@@ -927,15 +986,39 @@ async function installUpdate({ forcePick = false } = {}) {
     // 用户在文件选择框里点取消不是错误，不该红字吓人
     const aborted = err?.name === 'AbortError';
     progress.textContent = '';
-    showUpdateResult(aborted ? '已取消' : `安装失败：${err?.message || err}`, aborted ? '' : 'error');
+    $('manualUpdateHelp').open = true;
+    showUpdateResult(aborted ? '已取消目录选择。也可下载更新包，按下方步骤更新。' : `未能更新目录：${err?.message || err}。请使用「下载更新包」，按下方步骤更新。`, aborted ? '' : 'error');
     btn.disabled = false;
     $('pickDir').disabled = false;
+    $('downloadUpdate').disabled = false;
+    $('checkUpdate').disabled = false;
   }
 }
 
 $('checkUpdate').addEventListener('click', checkUpdate);
 $('installUpdate').addEventListener('click', () => installUpdate());
 $('pickDir').addEventListener('click', () => installUpdate({ forcePick: true }));
+$('downloadUpdate').addEventListener('click', async () => {
+  if (!pendingRelease) return;
+  const buttons = ['downloadUpdate', 'installUpdate', 'pickDir', 'checkUpdate'];
+  buttons.forEach(id => $(id).disabled = true);
+  try {
+    await updater.downloadPackage(pendingRelease, text => $('updateProgress').textContent = text, buffer => {
+      const url = URL.createObjectURL(new Blob([buffer], { type: 'application/zip' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `MikeLingo-v${pendingRelease.version}.zip`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    });
+    $('manualUpdateHelp').open = true;
+    $('updateProgress').textContent = '更新包已校验并发起下载。请按下方步骤加载，尚未完成安装。';
+  } catch (err) {
+    showUpdateResult(`下载失败：${err?.message || err}`, 'error');
+  } finally {
+    buttons.forEach(id => $(id).disabled = false);
+  }
+});
 
 /* -------------------------------- 同步与备份 ------------------------------- */
 

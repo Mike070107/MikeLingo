@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
   <head>
-    <meta charset="UTF-8" />
+    <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>MikeLingo</title>
     <link rel="stylesheet" href="popup.css" />
   </head>
@@ -20,7 +20,7 @@
           <div class="brand-sub" id="pageHost">—</div>
         </div>
       </div>
-      <button class="icon-btn" id="openOptions" type="button" title="设置">
+      <button class="icon-btn" id="openOptions" type="button" title="设置" aria-label="设置">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="3" />
           <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.2.61.75 1.03 1.4 1.03H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
@@ -35,17 +35,17 @@
       </div>
 
       <button class="primary" id="toggleBtn" type="button">
-        <span id="toggleLabel">对照翻译此页面</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16M7 3v4M4 12h7m-4 0v8m7 0 3-8 3 8m-5-3h4"/></svg><span id="toggleLabel">对照翻译此页面</span>
       </button>
-      <p class="hint" id="progress">快捷键 Alt+T · 右键菜单也可触发</p>
+      <p class="hint" id="progress">Alt + T</p>
 
       <section class="field quick">
         <div class="quick-head">
           <label class="label" for="quickInput">快速翻译</label>
           <span class="quick-lang">
-            <label class="label" for="quickTarget">译文语言</label>
+            <label class="sr-only" for="quickTarget">译文语言</label>
             <select id="quickTarget">
-              <option value="auto">自动（中 ⇄ 英）</option>
+              <option value="auto">中 ⇄ 英</option>
               <option value="global">跟随设置</option>
               <option value="简体中文">简体中文</option>
               <option value="繁體中文">繁體中文</option>
@@ -102,9 +102,9 @@
       <section class="field">
         <span class="label" id="modeLabel">显示模式</span>
         <div class="segmented" role="radiogroup" aria-labelledby="modeLabel">
-          <button type="button" data-mode="inline" role="radio" aria-checked="false">段落对照</button>
-          <button type="button" data-mode="columns" role="radio" aria-checked="false">左右并列</button>
-          <button type="button" data-mode="replace" role="radio" aria-checked="false">仅译文</button>
+          <button type="button" data-mode="inline" role="radio" aria-checked="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 6h14M5 10h10M5 15h14M5 19h10"/></svg>段落对照</button>
+          <button type="button" data-mode="columns" role="radio" aria-checked="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></svg>左右并列</button>
+          <button type="button" data-mode="replace" role="radio" aria-checked="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 6h14M5 12h14M5 18h10"/></svg>仅译文</button>
         </div>
       </section>
 

@@ -1,12 +1,14 @@
 {
   "name": "mikelingo",
-  "version": "1.11.0",
+  "version": "1.12.0",
   "description": "MikeLingo —— Chrome / Edge 网页对照翻译扩展（开发与测试用的 Node 依赖，不参与打包）",
   "private": true,
   "scripts": {
     "test": "node tools/e2e-test.cjs",
     "test:edge": "node tools/e2e-test.cjs --edge",
     "test:real": "node tools/real-api-test.cjs",
+    "test:update": "node tools/update-regression.cjs",
+    "test:ui": "node tools/ui-regression.cjs",
     "icons": "node tools/generate-icons.cjs",
     "pack": "node tools/pack.cjs"
   },

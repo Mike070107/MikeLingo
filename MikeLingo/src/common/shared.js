@@ -7,6 +7,7 @@
   const DEFAULT_PROVIDER = {
     id: 'deepseek',
     name: 'DeepSeek',
+    type: 'openai',
     baseUrl: 'https://api.deepseek.com',
     model: 'deepseek-chat',
     temperature: 1.3,
@@ -102,11 +103,17 @@
     let n = 2;
     while (usedIds.has(id)) id = `${base}-${n++}`; // 同 id 会互相覆盖密钥，必须去重
     usedIds.add(id);
+    const rawBaseUrl = String(p.baseUrl || '').trim().replace(/\/+$/, '');
+    const inferredDeepL = /^https:\/\/api(?:-free)?\.deepl\.com$/i.test(rawBaseUrl);
+    const type = p.type === 'deepl' || (!p.type && inferredDeepL) ? 'deepl' : 'openai';
+    const deeplPlan = type === 'deepl' && (p.deeplPlan === 'pro' || /\/\/api\.deepl\.com$/i.test(rawBaseUrl)) ? 'pro' : 'free';
     return {
       id,
       name: String(p.name || '').trim().slice(0, 40) || `接口 ${index + 1}`,
-      baseUrl: String(p.baseUrl || '').trim().replace(/\/+$/, '') || DEFAULT_PROVIDER.baseUrl,
-      model: String(p.model || '').trim() || DEFAULT_PROVIDER.model,
+      type,
+      deeplPlan,
+      baseUrl: rawBaseUrl || (type === 'deepl' ? (deeplPlan === 'pro' ? 'https://api.deepl.com' : 'https://api-free.deepl.com') : DEFAULT_PROVIDER.baseUrl),
+      model: type === 'deepl' ? '' : String(p.model || '').trim() || DEFAULT_PROVIDER.model,
       temperature: clampNumber(p.temperature, 0, 2, DEFAULT_PROVIDER.temperature),
       timeout: clampNumber(p.timeout, 5000, 300000, DEFAULT_PROVIDER.timeout)
     };
@@ -254,6 +261,10 @@
     const base = (id && list.find((p) => p.id === id)) || activeProvider(settings);
     const model = String(settings?.explainModel || '').trim();
     return model && model !== base.model ? Object.assign({}, base, { model }) : base;
+  }
+
+  function isDeepLProvider(provider) {
+    return provider?.type === 'deepl';
   }
 
   /** 只回显脱敏预览，密钥本身不出现在界面和日志里 */
@@ -621,6 +632,40 @@
     return CHINESE_TARGET_RE.test(raw) ? 'Chinese' : 'English';
   }
 
+  /** DeepL Translate API 的目标语言代码；不传 source_lang 即保留自动识别。 */
+  const DEEPL_LANG_MAP = {
+    '简体中文': 'ZH-HANS',
+    '中文': 'ZH-HANS',
+    '繁體中文': 'ZH-HANT',
+    '繁体中文': 'ZH-HANT',
+    English: 'EN-US',
+    '英语': 'EN-US',
+    '日本語': 'JA',
+    '日语': 'JA',
+    '한국어': 'KO',
+    '韩语': 'KO',
+    Français: 'FR',
+    '法语': 'FR',
+    Deutsch: 'DE',
+    '德语': 'DE',
+    Español: 'ES',
+    '西班牙语': 'ES',
+    'Русский': 'RU',
+    '俄语': 'RU',
+    'ไทย': 'TH',
+    '泰语': 'TH',
+    'Tiếng Việt': 'VI',
+    '越南语': 'VI'
+  };
+
+  function deeplTargetLang(targetLang) {
+    const raw = String(targetLang || '').trim();
+    if (DEEPL_LANG_MAP[raw]) return DEEPL_LANG_MAP[raw];
+    const code = raw.toUpperCase().replace('_', '-');
+    if (/^[A-Z]{2}(?:-[A-Z]{2,4})?$/.test(code)) return code;
+    return CHINESE_TARGET_RE.test(raw) ? 'ZH-HANS' : 'EN-US';
+  }
+
   async function hashText(text) {
     const data = new TextEncoder().encode(text);
     const buf = await crypto.subtle.digest('SHA-1', data);
@@ -664,6 +709,7 @@
     normalizeProvider,
     activeProvider,
     explainProvider,
+    isDeepLProvider,
     loadSettings,
     saveSettings,
     loadApiKey,
@@ -694,6 +740,7 @@
     MAX_SPEAK_CHARS,
     isTranslationOnlyModel,
     mtTargetLang,
+    deeplTargetLang,
     hashText,
     isEdge,
     extensionsPageUrl,

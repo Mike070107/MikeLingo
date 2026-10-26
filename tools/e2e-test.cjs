@@ -9,7 +9,7 @@ const { spawn } = require('child_process');
 const puppeteer = require('puppeteer');
 
 const EXT_PATH = path.join(__dirname, '..', 'MikeLingo');
-const PORT = 8787;
+const PORT = Number(process.env.MIKELINGO_TEST_PORT) || 8787;
 const PAGE_URL = `http://127.0.0.1:${PORT}/test.html`;
 
 const USE_EDGE = process.argv.includes('--edge');
@@ -769,6 +769,85 @@ async function waitFor(page, fn, timeout = 15000) {
       modelOptions.unknown.row.length === 0 && modelOptions.unknown.explain.length === 0,
       `row=${modelOptions.unknown.row} explain=${modelOptions.unknown.explain}`
     );
+    const deeplSupport = await optionsPage.evaluate(() => {
+      const normalized = globalThis.DST.normalizeProvider(
+        { id: 'deepl', name: 'DeepL', type: 'deepl', baseUrl: 'https://api-free.deepl.com', model: '' },
+        0,
+        new Set()
+      );
+      return {
+        type: normalized.type,
+        model: normalized.model,
+        zh: globalThis.DST.deeplTargetLang('简体中文'),
+        en: globalThis.DST.deeplTargetLang('English'),
+        preset: Array.from(document.querySelectorAll('#presetSelect option')).some((option) => option.value === 'deepl-free')
+      };
+    });
+    check(
+      'DeepL 服务商类型和语言映射可用',
+      deeplSupport.type === 'deepl' && deeplSupport.model === '' && deeplSupport.zh === 'ZH-HANS' && deeplSupport.en === 'EN-US',
+      JSON.stringify(deeplSupport)
+    );
+    check('DeepL Free 出现在现有服务商预设中', deeplSupport.preset);
+    const beforeDeepL = await optionsPage.evaluate(async () => ({
+      sync: await chrome.storage.sync.get('settings'),
+      local: await chrome.storage.local.get(['apiKeys', 'apiKey'])
+    }));
+    await optionsPage.evaluate(async (port) => {
+      const current = await globalThis.DST.loadSettings();
+      const provider = globalThis.DST.normalizeProvider(
+        {
+          id: 'deepl-e2e',
+          name: 'DeepL 协议回归',
+          type: 'deepl',
+          deeplPlan: 'free',
+          baseUrl: `http://127.0.0.1:${port}`,
+          model: '',
+          timeout: 10000
+        },
+        0,
+        new Set()
+      );
+      await globalThis.DST.saveSettings({ providers: [provider], activeProviderId: provider.id, targetLang: '简体中文', cacheEnabled: false });
+      await chrome.storage.local.set({ apiKeys: { [provider.id]: 'deepl-mock-key:fx' }, apiKey: '' });
+    }, PORT);
+    const deeplBatch = await askBackground(optionsPage, { type: 'TRANSLATE', texts: ['first paragraph', 'second paragraph'] });
+    check(
+      'DeepL 使用专用鉴权批量翻译并保持顺序',
+      deeplBatch?.ok === true &&
+        deeplBatch.results?.[0] === '【DeepL:ZH-HANS】first paragraph' &&
+        deeplBatch.results?.[1] === '【DeepL:ZH-HANS】second paragraph',
+      JSON.stringify(deeplBatch)
+    );
+    const deeplExplain = await askBackground(optionsPage, { type: 'EXPLAIN', text: 'translation' });
+    check(
+      'DeepL 不承担词典详解并给出通用模型引导',
+      deeplExplain?.ok === false && /DeepL Translate/.test(deeplExplain.error || '') && /通用模型/.test(deeplExplain.error || ''),
+      deeplExplain?.error || ''
+    );
+    const deeplRateLimit = await askBackground(optionsPage, { type: 'TRANSLATE', texts: ['__deepl_rate_limit__'] });
+    check(
+      'DeepL 429 会有限重试后恢复',
+      deeplRateLimit?.ok === true && deeplRateLimit.results?.[0] === '【DeepL:ZH-HANS】__deepl_rate_limit__',
+      JSON.stringify(deeplRateLimit)
+    );
+    const deeplQuota = await askBackground(optionsPage, { type: 'TRANSLATE', texts: ['__deepl_quota__'] });
+    check(
+      'DeepL 456 配额耗尽给出明确错误',
+      deeplQuota?.ok === false && /字符配额已用尽/.test(deeplQuota.error || '') && /HTTP 456/.test(deeplQuota.error || ''),
+      deeplQuota?.error || ''
+    );
+    await optionsPage.evaluate(async () => chrome.storage.local.set({ apiKeys: { 'deepl-e2e': 'wrong-key' } }));
+    const deeplAuth = await askBackground(optionsPage, { type: 'TRANSLATE', texts: ['auth check'] });
+    check(
+      'DeepL 401/403 鉴权失败指向 API Key 或权限',
+      deeplAuth?.ok === false && /API Key|无权访问/.test(deeplAuth.error || '') && /HTTP 403/.test(deeplAuth.error || ''),
+      deeplAuth?.error || ''
+    );
+    await optionsPage.evaluate(async (snapshot) => {
+      await chrome.storage.sync.set(snapshot.sync);
+      await chrome.storage.local.set(snapshot.local);
+    }, beforeDeepL);
     // 回归：框里存着一个已下线的旧模型名时，候选照样要能选中
     // （以前是 input+datalist，datalist 会按框里的文字过滤，一条都不剩 = 用户眼里的「下拉点不开」）
     const staleModel = await optionsPage.evaluate(async () => {
@@ -841,7 +920,7 @@ async function waitFor(page, fn, timeout = 15000) {
       const adv = li.querySelector('.p-adv');
       // 只看直接摆在外面的字段（不含折叠区里的）
       const topLevel = [...body.children]
-        .filter((el) => el.classList.contains('field'))
+        .filter((el) => el.classList.contains('field') && !el.hidden)
         .map((el) => el.querySelector('label')?.textContent.trim());
       const keyRow = li.querySelector('.p-key').closest('.input-row');
       return {
@@ -938,7 +1017,7 @@ async function waitFor(page, fn, timeout = 15000) {
 
     /* --- 11. 翻译专用模型（qwen-mt）走独立调用方式 --- */
     await optionsPage.evaluate(async () => chrome.runtime.sendMessage({ type: 'CACHE_CLEAR' }));
-    await applySettings(worker, { model: 'qwen-mt-turbo', targetLang: '简体中文' }, 'sk-mock-key-123456');
+    await applySettings(worker, { model: 'qwen-mt-flash', targetLang: '简体中文' }, 'sk-mock-key-123456');
     await page.reload({ waitUntil: 'domcontentloaded' });
     await sleep(500);
     await toggle(worker);
@@ -981,13 +1060,13 @@ async function waitFor(page, fn, timeout = 15000) {
     // 先清缓存，否则译文可能直接命中缓存，测不出接口地址有没有真的迁移过来
     // Service Worker 收不到自己发的消息，借设置页这个普通页面发
     await optionsPage.evaluate(async () => chrome.runtime.sendMessage({ type: 'CACHE_CLEAR' }));
-    await worker.evaluate(async () => {
+    await worker.evaluate(async (port) => {
       await chrome.storage.sync.set({
-        settings: { baseUrl: 'http://127.0.0.1:8787', model: 'legacy-model', displayMode: 'inline', selectionEnabled: true }
+        settings: { baseUrl: `http://127.0.0.1:${port}`, model: 'legacy-model', displayMode: 'inline', selectionEnabled: true }
       });
       await chrome.storage.local.remove('apiKeys');
       await chrome.storage.local.set({ apiKey: 'sk-legacy-key-999' });
-    });
+    }, PORT);
     const migrated = await worker.evaluate(async () => {
       const s = globalThis.DST.normalizeSettings((await chrome.storage.sync.get('settings')).settings);
       const key = await globalThis.DST.loadApiKey(s.activeProviderId);
@@ -1577,7 +1656,7 @@ async function waitFor(page, fn, timeout = 15000) {
         }
         return dir;
       };
-      const extManifest = JSON.stringify({ name, version: '1.0.0' });
+      const extManifest = JSON.stringify({ ...chrome.runtime.getManifest(), name, version: '1.0.0' });
       const tryResolve = async (dir) => {
         try {
           return { ok: true, name: (await updater.resolveInstallDir(dir)).name };

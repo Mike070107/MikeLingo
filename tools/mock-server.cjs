@@ -194,6 +194,7 @@ async function handleGist(req, res, url) {
  * minGapMs：两次请求间隔小于这个值也回 429
  */
 const rateLimit = { maxConcurrent: 0, minGapMs: 0, active: 0, lastAt: 0, rejected: 0, served: 0 };
+let deepl429Seen = false;
 
 const server = http.createServer((req, res) => {
   // MOCK_VERBOSE=1 时打印每个请求，排查"请求到底有没有到服务端"用
@@ -360,6 +361,28 @@ const server = http.createServer((req, res) => {
   req.on('data', (chunk) => (body += chunk));
   req.on('end', () => {
     const auth = req.headers.authorization || '';
+    if (reqUrl.pathname === '/v2/translate') {
+      if (auth !== 'DeepL-Auth-Key deepl-mock-key:fx') {
+        return sendJson(res, 403, { message: 'Authorization failure, check auth_key' });
+      }
+      let payload;
+      try {
+        payload = JSON.parse(body);
+      } catch {
+        return sendJson(res, 400, { message: 'Invalid JSON' });
+      }
+      if (!Array.isArray(payload.text) || !payload.text.length || payload.source_lang) {
+        return sendJson(res, 400, { message: 'text[] is required and source_lang must be omitted for auto detection' });
+      }
+      if (payload.text.includes('__deepl_quota__')) return sendJson(res, 456, { message: 'Quota exceeded' });
+      if (payload.text.includes('__deepl_rate_limit__') && !deepl429Seen) {
+        deepl429Seen = true;
+        return sendJson(res, 429, { message: 'Too many requests' }, { 'Retry-After': '0' });
+      }
+      return sendJson(res, 200, {
+        translations: payload.text.map((text) => ({ detected_source_language: 'EN', text: `【DeepL:${payload.target_lang}】${text}` }))
+      });
+    }
     if (!/^Bearer sk-/.test(auth)) {
       res.writeHead(401, { 'Content-Type': 'application/json' });
       return res.end(JSON.stringify({ error: { message: 'Authentication Fails, Your api key is invalid' } }));

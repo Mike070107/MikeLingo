@@ -213,6 +213,14 @@ async function explainText(text, { targetLang } = {}) {
     err.code = 'NO_API_KEY';
     throw err;
   }
+  if (DST.isDeepLProvider(provider)) {
+    const err = new Error(
+      `详解当前跟随 DeepL 接口「${provider.name}」，但 DeepL Translate 只负责翻译，不支持词典详解。` +
+        `请到设置页「划词翻译 → 详解使用的接口」选择 qwen-plus、DeepSeek 等通用模型接口。`
+    );
+    err.code = 'DEEPL_EXPLAIN_UNSUPPORTED';
+    throw err;
+  }
   // qwen-mt 这类翻译专用模型不看 system prompt，只会把原文翻一遍，出不了详解
   if (DST.isTranslationOnlyModel(provider.model)) {
     const err = new Error(
@@ -296,6 +304,7 @@ function friendlyHttpError(status, bodyText) {
     404: '接口地址不存在，请检查设置页里该接口的 API 地址',
     422: '请求参数不合法',
     429: '请求过于频繁，已触发限流，请到设置页把「并发请求数」调低或填写「每分钟请求上限」',
+    456: 'DeepL 本计费周期的字符配额已用尽，请到 DeepL 账户查看用量或调整配额',
     500: '服务端错误，请稍后重试',
     503: '服务暂时不可用（可能是服务器繁忙）'
   };
@@ -486,6 +495,55 @@ async function callChatOnce(messages, provider, apiKey, { maxTokens, translation
   return content;
 }
 
+async function callDeepLOnce(items, provider, apiKey, targetLang) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), provider.timeout);
+  let response;
+  try {
+    response = await fetch(`${provider.baseUrl}/v2/translate`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `DeepL-Auth-Key ${apiKey}`
+      },
+      body: JSON.stringify({ text: items.map((item) => item.text), target_lang: DST.deeplTargetLang(targetLang) }),
+      signal: controller.signal
+    });
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      const e = new Error(`DeepL 请求已取消：超过 ${Math.round(provider.timeout / 1000)} 秒未完成`);
+      e.retryable = true;
+      throw e;
+    }
+    const e = new Error(`DeepL 网络请求失败：${err.message}。请检查网络、代理或 Free/Pro 地址是否匹配`);
+    e.retryable = true;
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    const err = friendlyHttpError(response.status, body);
+    err.retryable = response.status === 429 || response.status >= 500;
+    if (response.status === 429) {
+      err.retryAfter = parseRetryAfter(response);
+      limiter.penalize(err.retryAfter);
+    }
+    throw err;
+  }
+  const data = await response.json().catch(() => null);
+  if (!Array.isArray(data?.translations) || data.translations.length !== items.length) {
+    const err = new Error('DeepL 返回的译文数量与输入不一致，未写入部分结果');
+    err.retryable = true;
+    throw err;
+  }
+  return data.translations.map((entry) => String(entry?.text || '').trim());
+}
+
+function callDeepL(items, provider, apiKey, targetLang) {
+  return limiter.run(() => callDeepLOnce(items, provider, apiKey, targetLang));
+}
+
 /**
  * 限流（429）单独给更多重试次数：它不是"错了"，只是"太快了"，
  * 等一会儿必定能成，没必要按普通错误的次数直接放弃，让用户看见红字。
@@ -552,6 +610,10 @@ async function translateItemsMt(items, settings, provider, apiKey) {
 /** 翻译一组片段，返回 Map<id, 译文>；解析不全时二分重试 */
 async function translateItems(items, settings, provider, apiKey, depth = 0) {
   if (!items.length) return new Map();
+  if (DST.isDeepLProvider(provider)) {
+    const values = await withRetry(() => callDeepL(items, provider, apiKey, settings.targetLang), settings);
+    return new Map(items.map((item, index) => [item.id, values[index]]).filter(([, value]) => value));
+  }
   if (DST.isTranslationOnlyModel(provider.model)) return translateItemsMt(items, settings, provider, apiKey);
   const messages = [
     { role: 'system', content: buildSystemPrompt(settings) },
@@ -606,7 +668,7 @@ async function translateTexts(texts, { targetLang } = {}) {
     }
     if (settings.cacheEnabled) {
       const hash = await DST.hashText(text);
-      const key = `${provider.model}|${settings.targetLang}|${hash}`;
+      const key = `${provider.type}|${provider.baseUrl}|${provider.model}|${settings.targetLang}|${hash}`;
       keys[i] = key;
       const cached = await cacheGet(key);
       if (cached) {
@@ -644,6 +706,10 @@ async function testConnection(override = {}) {
   if (!apiKey) throw new Error('请先填写 API Key');
   const started = Date.now();
   const sample = 'Hello, world! This is a connection test.';
+  if (DST.isDeepLProvider(provider)) {
+    const output = await callDeepL([{ id: 0, text: sample }], provider, apiKey, settings.targetLang);
+    return { latency: Date.now() - started, sample: output[0].slice(0, 120), model: 'DeepL Translate' };
+  }
   const isMt = DST.isTranslationOnlyModel(provider.model);
   const output = await callChat(
     isMt
