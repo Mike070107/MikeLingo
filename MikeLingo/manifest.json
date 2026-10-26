@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "MikeLingo",
-  "version": "1.13.3",
+  "version": "1.13.4",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvcqn36UMTBTG0pwsDIJIE/DCe8lCR4OJq/5RTADq0nOGsXuBq2JBs2HoMN/F/e1EHCgDAz+S9LRS0bE+LfoRXifcCS/gzwik68YyViIdJOlUsZGUjaKLk+fjFtMwwBpphpiBgYboVDUaCWAM6RXUXgplmPAPPOLEMCNw3eoX1RMPiILrgthN37XTgatgQKsTlqqDPlv8PA5A24FXRYu8ZEMDCBSiCZXy7inNoOlgPibw3CY3B/CxBbGWxVtr3upr69NtH9KkrdI7W4cu8PQvMwi4QyS02y8hGeI+mDuG7PVkixt2ZpGmVdMjFRAjP3mtC93kceTolPkCddfDz685MQIDAQAB",
   "description": "多接口 AI 网页对照翻译与划词翻译，兼容 DeepSeek / 通义 / 智谱 / Gemini 等 OpenAI 协议服务，地址、模型与样式均可自定义。",
   "minimum_chrome_version": "114",

@@ -926,6 +926,27 @@ async function renderUpdateMeta() {
   $('updateCheckedAt').textContent = describeCheckedAt(stored.checkedAt);
 }
 
+/**
+ * 旧版更新器曾经能把新文件写到磁盘，却没有让浏览器重读 manifest，
+ * 会出现「页面已是新版、运行时还是旧版」。这里自动识别并自修复一次。
+ */
+async function activateNewFilesIfNeeded() {
+  try {
+    const runtimeVersion = chrome.runtime.getManifest().version;
+    const response = await fetch(chrome.runtime.getURL('manifest.json'), { cache: 'no-store' });
+    const diskVersion = String((await response.json()).version || '');
+    if (!diskVersion || DST.compareVersions(diskVersion, runtimeVersion) <= 0) return false;
+    if (sessionStorage.getItem('mikelingoReloadAttempt') === diskVersion) return false;
+    sessionStorage.setItem('mikelingoReloadAttempt', diskVersion);
+    $('currentVersion').textContent = `v${runtimeVersion}`;
+    showUpdateResult(`新版本 v${diskVersion} 已安装，正在自动启用…`, 'ok');
+    setTimeout(() => chrome.runtime.reload(), 500);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function checkUpdate() {
   const btn = $('checkUpdate');
   btn.disabled = true;
@@ -971,6 +992,12 @@ async function installUpdate() {
   showUpdateResult('');
 
   try {
+    if (typeof chrome.runtime.sendNativeMessage !== 'function') {
+      progress.textContent = '新版本已安装，正在自动启用…';
+      showUpdateResult('正在启用新版本，无需下载或选择目录。', 'ok');
+      setTimeout(() => chrome.runtime.reload(), 500);
+      return;
+    }
     await updater.installWithNativeHost(pendingRelease, (text) => (progress.textContent = text));
 
     progress.textContent = `已安装 v${pendingRelease.version}，正在重新加载扩展…`;
@@ -1238,6 +1265,7 @@ async function refreshKeyMasks() {
 }
 
 (async function init() {
+  if (await activateNewFilesIfNeeded()) return;
   settings = await DST.loadSettings();
   providers = settings.providers.map((p) => Object.assign({}, p));
   activeProviderId = settings.activeProviderId;
